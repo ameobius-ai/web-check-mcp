@@ -13,16 +13,27 @@ Gap verified 2026-07-25: no public MCP/SDK/Hermes skill existed for this API. Th
 - **Zero pip deps** — Python 3.10+ stdlib only
 - **STDIO JSON-RPC** with `initialize` handshake + tool annotations (`readOnlyHint` + `openWorldHint`)
 
-## Important: self-host the API
+## Public API works (with fallback)
 
-Public `https://web-check.xyz/api` often returns **403** from datacenter IPs.
+Two public bases are tried automatically:
+
+| Base | Status |
+|------|--------|
+| `web-check.as93.net/api` (Netlify mirror) | **200 OK** — more open, Cloudflare front |
+| `web-check.xyz/api` (Vercel primary) | **200/429** — may challenge datacenter IPs |
+
+Set `WEB_CHECK_BASE_URL` explicitly to skip probing. Fallback auto-enables when base starts with `https://web-check.` and can be forced via `WebCheckClient(fallback=True)`.
+
+No key, no auth. LO confirms UI works fine; the agent wrapper mirrors that.
+
+## Self-host (optional)
+
+For heavy load or offline use:
 
 ```bash
 docker run -d --name web-check -p 3000:3000 lissy93/web-check
 export WEB_CHECK_BASE_URL=http://127.0.0.1:3000/api
 ```
-
-Optional: `DISABLE_GUI=true` for API-only.
 
 Upstream Go rewrite [`xray-web/web-check-api`](https://github.com/xray-web/web-check-api) is early WIP — prefer Node/Docker image for full endpoint parity.
 

@@ -73,7 +73,18 @@ DEFAULT_BASE_URL = os.environ.get("WEB_CHECK_BASE_URL", "http://127.0.0.1:3000/a
 DEFAULT_TIMEOUT = int(os.environ.get("WEB_CHECK_TIMEOUT", "25"))
 DEFAULT_MAX_WORKERS = int(os.environ.get("WEB_CHECK_MAX_WORKERS", "6"))
 DEFAULT_MAX_CHARS = int(os.environ.get("WEB_CHECK_MAX_CHARS", "12000"))
-USER_AGENT = "web-check-mcp/0.1.0 (+https://github.com/Lissy93/web-check)"
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/120.0.0.0 Safari/537.36"
+)
+
+# Ordered list of bases tried on health/run if primary fails.
+# Vercel often challenges datacenter IPs with 429; Netlify mirror is more open.
+PUBLIC_BASE_URLS = [
+    "https://web-check.as93.net/api",  # Netlify — Cloudflare front, more permissive
+    "https://web-check.xyz/api",       # Vercel primary (UI works from browser, API may 429)
+]
 
 
 def _normalize_base(base_url: str) -> str:
@@ -145,7 +156,12 @@ def truncate_payload(data: Any, max_chars: int = DEFAULT_MAX_CHARS) -> Any:
 
 
 class WebCheckClient:
-    """Thin client over Web Check REST endpoints."""
+    """Thin client over Web Check REST endpoints.
+
+    Multi-base failover: when ``fallback=True`` (default for public bases),
+    failed probes are retried against PUBLIC_BASE_URLS. The first base that
+    returns a 2xx/4xx JSON body wins; 429/403 from Vercel triggers fallback.
+    """
 
     def __init__(
         self,
@@ -155,6 +171,7 @@ class WebCheckClient:
         max_chars: int = DEFAULT_MAX_CHARS,
         verify_ssl: bool = True,
         opener: Optional[Callable[..., Any]] = None,
+        fallback: Optional[bool] = None,
     ):
         self.base_url = _normalize_base(base_url)
         self.timeout = timeout
@@ -162,6 +179,12 @@ class WebCheckClient:
         self.max_chars = max_chars
         self.verify_ssl = verify_ssl
         self._opener = opener  # injectable for tests
+        # Enable fallback automatically when using a public base or the
+        # default local base that the user did not explicitly set.
+        self.fallback = bool(fallback) if fallback is not None else (
+            self.base_url.startswith("https://web-check.")
+        )
+        self._resolved_base: Optional[str] = None
 
     def list_checks(self, group: Optional[str] = None) -> List[Dict[str, str]]:
         if group:
@@ -256,6 +279,29 @@ class WebCheckClient:
         except Exception as e:  # noqa: BLE001 — surface to agent as structured error
             return 0, {"error": str(e)}, str(e)
 
+    def _candidate_bases(self) -> List[str]:
+        """Bases to try, primary first. De-duplicates normalized forms."""
+        seen: set = set()
+        out: List[str] = []
+        primary = _normalize_base(self.base_url)
+        for b in [primary] + (list(PUBLIC_BASE_URLS) if self.fallback else []):
+            nb = _normalize_base(b)
+            if nb and nb not in seen:
+                seen.add(nb)
+                out.append(nb)
+        return out
+
+    def _is_blocking_status(self, status: int, data: Any) -> bool:
+        """429/403 or non-JSON challenge body signals a base is unusable."""
+        if status in (403, 429, 503):
+            return True
+        if status == 200 and isinstance(data, dict):
+            raw = data.get("raw", "")
+            # Vercel challenge returns HTML with these markers
+            if "x-vercel" in raw or "challenge" in raw[:500].lower():
+                return True
+        return False
+
     def check_one(self, check: str, url: str) -> Dict[str, Any]:
         name = check.strip().lstrip("/")
         if name not in CHECKS:
@@ -269,21 +315,40 @@ class WebCheckClient:
         target = _normalize_target(url)
         path = CHECKS[name]["path"]
         qs = urllib.parse.urlencode({"url": target})
-        endpoint = f"{self.base_url}{path}?{qs}"
-        status, data, err = self._http_get(endpoint)
-        ok = 200 <= status < 300 and err is None
-        # Web-check sometimes returns 200 with {skipped|error}
-        if isinstance(data, dict) and (data.get("error") or data.get("skipped")):
-            ok = False if data.get("error") else ok
-        return {
-            "check": name,
-            "group": CHECKS[name]["group"],
-            "ok": ok,
-            "status": status,
-            "endpoint": endpoint,
-            "error": err or (data.get("error") if isinstance(data, dict) else None),
-            "data": truncate_payload(data, self.max_chars) if data is not None else None,
-        }
+
+        bases = self._candidate_bases()
+        # If we previously resolved a working base, try it first and alone.
+        if self._resolved_base and self._resolved_base in bases:
+            bases = [self._resolved_base] + [b for b in bases if b != self._resolved_base]
+
+        last: Dict[str, Any] = {}
+        used_base: Optional[str] = None
+        for base in bases:
+            endpoint = f"{base}{path}?{qs}"
+            status, data, err = self._http_get(endpoint)
+            blocking = self._is_blocking_status(status, data)
+            ok = 200 <= status < 300 and err is None and not blocking
+            if isinstance(data, dict) and (data.get("error") or data.get("skipped")):
+                ok = False if data.get("error") else ok
+            last = {
+                "check": name,
+                "group": CHECKS[name]["group"],
+                "ok": ok,
+                "status": status,
+                "endpoint": endpoint,
+                "base_url": base,
+                "error": err or (data.get("error") if isinstance(data, dict) else None),
+                "data": truncate_payload(data, self.max_chars) if data is not None else None,
+            }
+            used_base = base
+            if ok or not (blocking or status == 0):
+                # Either succeeded or got a definitive non-blocking answer.
+                if ok:
+                    self._resolved_base = base
+                break
+        if used_base and last.get("ok"):
+            self._resolved_base = used_base
+        return last
 
     def run(
         self,
@@ -317,9 +382,12 @@ class WebCheckClient:
 
         ordered = [results[n] for n in names if n in results]
         ok_count = sum(1 for r in ordered if r.get("ok"))
+        bases_used = sorted({r.get("base_url") for r in ordered if r.get("base_url")})
         return {
             "url": target,
             "base_url": self.base_url,
+            "resolved_base_url": self._resolved_base or bases_used[0] if bases_used else None,
+            "bases_used": bases_used,
             "checks_requested": names,
             "ok_count": ok_count,
             "fail_count": len(ordered) - ok_count,
@@ -327,16 +395,24 @@ class WebCheckClient:
         }
 
     def health(self) -> Dict[str, Any]:
-        """Probe base URL reachability via get-ip on example.com."""
+        """Probe base URL reachability via get-ip on example.com.
+
+        With fallback enabled, tries PUBLIC_BASE_URLS in order and reports
+        which base actually answered.
+        """
         probe = self.check_one("get-ip", "https://example.com")
         return {
             "base_url": self.base_url,
-            "reachable": bool(probe.get("ok") or probe.get("status") not in (0, None)),
+            "resolved_base_url": probe.get("base_url") or self._resolved_base,
+            "reachable": bool(probe.get("ok")),
             "status": probe.get("status"),
             "error": probe.get("error"),
+            "fallback_enabled": self.fallback,
+            "public_bases": PUBLIC_BASE_URLS,
             "hint": (
-                "If unreachable/403: self-host with "
-                "`docker run -p 3000:3000 lissy93/web-check` "
+                "Public web-check.xyz (Vercel) may 429 datacenter IPs; "
+                "Netlify mirror web-check.as93.net is more open. "
+                "For production: self-host `docker run -p 3000:3000 lissy93/web-check` "
                 "and set WEB_CHECK_BASE_URL=http://127.0.0.1:3000/api"
             ),
         }

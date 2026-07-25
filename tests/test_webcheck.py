@@ -161,6 +161,76 @@ class TestClient:
         c = WebCheckClient(base_url="http://127.0.0.1:3000", opener=opener)
         assert c.base_url.endswith("/api")
 
+    def test_fallback_vercel_then_netlify(self):
+        # Primary (vercel) returns 429; fallback (netlify) returns 200.
+        opener = FakeOpener(
+            {
+                "web-check.xyz": (429, {"error": "Forbidden"}),
+                "web-check.as93.net": (200, {"ip": "162.159.128.233"}),
+            }
+        )
+        c = WebCheckClient(
+            base_url="https://web-check.xyz/api",
+            opener=opener,
+            fallback=True,
+        )
+        res = c.check_one("get-ip", "https://discord.com")
+        assert res["ok"] is True
+        assert res["status"] == 200
+        assert "as93.net" in res["base_url"]
+
+    def test_fallback_disabled_uses_primary_only(self):
+        opener = FakeOpener(
+            {
+                "web-check.xyz": (429, {"error": "Forbidden"}),
+                "web-check.as93.net": (200, {"ip": "1.2.3.4"}),
+            }
+        )
+        c = WebCheckClient(
+            base_url="https://web-check.xyz/api",
+            opener=opener,
+            fallback=False,
+        )
+        res = c.check_one("get-ip", "https://discord.com")
+        assert res["ok"] is False
+        assert res["status"] == 429
+
+    def test_resolved_base_sticky(self):
+        opener = FakeOpener(
+            {
+                "web-check.xyz": (429, {"error": "x"}),
+                "web-check.as93.net": (200, {"ip": "1.1.1.1"}),
+            }
+        )
+        c = WebCheckClient(base_url="https://web-check.xyz/api", opener=opener, fallback=True)
+        c.check_one("get-ip", "example.com")
+        assert c._resolved_base == "https://web-check.as93.net/api"
+
+    def test_challenge_html_treated_as_blocking(self):
+        opener = FakeOpener(
+            {
+                "web-check.xyz": (200, {"raw": "<!DOCTYPE html><x-vercel challenge>"}),
+                "web-check.as93.net": (200, {"ip": "1.1.1.1"}),
+            }
+        )
+        c = WebCheckClient(base_url="https://web-check.xyz/api", opener=opener, fallback=True)
+        res = c.check_one("get-ip", "example.com")
+        assert res["ok"] is True
+        assert "as93.net" in res["base_url"]
+
+    def test_health_reports_resolved_base(self):
+        opener = FakeOpener(
+            {
+                "web-check.xyz": (429, {"error": "x"}),
+                "web-check.as93.net": (200, {"ip": "1.1.1.1"}),
+            }
+        )
+        c = WebCheckClient(base_url="https://web-check.xyz/api", opener=opener, fallback=True)
+        h = c.health()
+        assert h["reachable"] is True
+        assert "as93.net" in (h.get("resolved_base_url") or "")
+        assert h["fallback_enabled"] is True
+
 
 # ── MCP server ────────────────────────────────────────────────────────────
 
