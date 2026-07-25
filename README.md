@@ -1,5 +1,7 @@
 # Web Check MCP
 
+<!-- mcp-name: io.github.AMEOBIUS-space/web-check-mcp -->
+
 [![PyPI](https://img.shields.io/pypi/v/web-check-mcp)](https://pypi.org/project/web-check-mcp/)
 [![Python](https://img.shields.io/pypi/pyversions/web-check-mcp)](https://pypi.org/project/web-check-mcp/)
 [![CI](https://github.com/AMEOBIUS-space/web-check-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/AMEOBIUS-space/web-check-mcp/actions/workflows/ci.yml)
@@ -101,6 +103,24 @@ print(client.check_one("ssl", "example.com"))
   }
 }
 ```
+
+After `pip install web-check-mcp`:
+
+```json
+{
+  "mcpServers": {
+    "web-check": {
+      "command": "web-check-mcp",
+      "args": ["--stdio"],
+      "env": {
+        "WEB_CHECK_BASE_URL": "https://web-check.as93.net/api"
+      }
+    }
+  }
+}
+```
+
+Official registry metadata lives in [`server.json`](./server.json) (`io.github.AMEOBIUS-space/web-check-mcp`). Publish with `mcp-publisher` after the next PyPI release that includes the `mcp-name` marker above.
 
 ## Tool Reference
 

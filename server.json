@@ -1,0 +1,57 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.AMEOBIUS-space/web-check-mcp",
+  "title": "Web Check MCP",
+  "description": "Agent wrapper for Lissy93 Web Check — 31 OSINT checks as MCP tools + CLI. Zero pip deps, multi-base failover, parallel fan-out.",
+  "version": "0.2.0",
+  "repository": {
+    "url": "https://github.com/AMEOBIUS-space/web-check-mcp",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "web-check-mcp",
+      "version": "0.2.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "--stdio"
+        }
+      ],
+      "environmentVariables": [
+        {
+          "name": "WEB_CHECK_BASE_URL",
+          "description": "Web Check API base URL. Default https://web-check.as93.net/api with automatic failover to web-check.xyz. Set to self-host (e.g. http://127.0.0.1:3000/api).",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "WEB_CHECK_TIMEOUT",
+          "description": "Per-request timeout in seconds (default 25).",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "WEB_CHECK_MAX_WORKERS",
+          "description": "Parallel check workers for multi-check runs (default 6).",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "WEB_CHECK_MAX_CHARS",
+          "description": "Max JSON chars per check payload before truncation (default 12000).",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        }
+      ]
+    }
+  ]
+}
