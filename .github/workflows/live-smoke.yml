@@ -1,0 +1,51 @@
+name: live-smoke
+
+# Real network calls against public Web Check bases.
+# Informational by default: public bases rate-limit CI egress IPs, so a red
+# run here does not mean our code regressed. Enable strict mode manually when
+# you actually want the job to gate on reachability.
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: Target to scan
+        required: false
+        default: https://example.com
+      group:
+        description: Check group (quick, security, server, quality, heavy, all)
+        required: false
+        default: quick
+      strict:
+        description: Fail the job if no base is reachable
+        type: boolean
+        required: false
+        default: false
+  schedule:
+    # Mondays 06:00 UTC — early warning if a public base dies for good.
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-smoke
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Probe public bases
+        run: |
+          python scripts/live_smoke.py \
+            --url "${{ inputs.url || 'https://example.com' }}" \
+            --group "${{ inputs.group || 'quick' }}" \
+            ${{ inputs.strict && '--strict' || '' }}
