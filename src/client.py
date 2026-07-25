@@ -90,9 +90,8 @@ PUBLIC_BASE_URLS = [
 def _normalize_base(base_url: str) -> str:
     base = (base_url or DEFAULT_BASE_URL).rstrip("/")
     # Accept host-only forms: http://localhost:3000 -> .../api
-    if not base.endswith("/api"):
-        if base.endswith(":3000") or base.rstrip("/").endswith("web-check"):
-            base = base + "/api"
+    if not base.endswith("/api") and (base.endswith(":3000") or base.rstrip("/").endswith("web-check")):
+        base = base + "/api"
     return base
 
 

@@ -4,4 +4,4 @@ __version__ = "0.2.0"
 
 from .client import CHECK_GROUPS, CHECKS, WebCheckClient
 
-__all__ = ["WebCheckClient", "CHECKS", "CHECK_GROUPS", "__version__"]
+__all__ = ["CHECKS", "CHECK_GROUPS", "WebCheckClient", "__version__"]
