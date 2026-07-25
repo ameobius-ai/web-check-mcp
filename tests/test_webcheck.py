@@ -13,15 +13,14 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.client import (  # noqa: E402
+from src.client import (
     CHECK_GROUPS,
     CHECKS,
     WebCheckClient,
     _query_param_name,
     truncate_payload,
 )
-from src.server import WebCheckMCPServer  # noqa: E402
-
+from src.server import WebCheckMCPServer
 
 # ---------------------------------------------------------------------------
 # Helpers

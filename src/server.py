@@ -378,8 +378,8 @@ def _cli(argv: list[str] | None = None) -> int:
     return 1
 
 
-def main() -> None:
-    raise SystemExit(_cli())
+def main(argv: list[str] | None = None) -> None:
+    raise SystemExit(_cli(argv))
 
 
 if __name__ == "__main__":
