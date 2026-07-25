@@ -16,6 +16,7 @@ import os
 import sys
 from typing import Any, Dict, List, Optional
 
+from . import __version__
 from .client import (
     CHECK_GROUPS,
     CHECKS,
@@ -24,8 +25,6 @@ from .client import (
     DEFAULT_TIMEOUT,
     WebCheckClient,
 )
-
-__version__ = "0.2.0"
 
 _READ_OPEN = {
     "readOnlyHint": True,
@@ -363,15 +362,17 @@ def _cli(argv: Optional[List[str]] = None) -> int:
         print(json.dumps(client.list_checks(group=args.group), indent=2))
         return 0
     if args.cmd == "health":
-        print(json.dumps(client.health(), indent=2))
-        return 0
+        h = client.health()
+        print(json.dumps(h, indent=2))
+        return 0 if h.get("reachable") else 2
     if args.cmd == "run":
         out = client.run(url=args.url, checks=args.checks, group=None if args.checks else args.group)
         print(json.dumps(out, indent=2, ensure_ascii=False))
         return 0 if out.get("ok_count", 0) > 0 else 2
     if args.cmd == "check":
-        print(json.dumps(client.check_one(args.check_name, args.url), indent=2, ensure_ascii=False))
-        return 0
+        one = client.check_one(args.check_name, args.url)
+        print(json.dumps(one, indent=2, ensure_ascii=False))
+        return 0 if one.get("ok") else 2
 
     parser.print_help()
     return 1

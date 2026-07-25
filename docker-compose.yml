@@ -1,0 +1,19 @@
+# Optional self-host: upstream Web Check + this MCP wrapper.
+services:
+  web-check:
+    image: lissy93/web-check:latest
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+  web-check-mcp:
+    build: .
+    depends_on:
+      - web-check
+    environment:
+      WEB_CHECK_BASE_URL: http://web-check:3000/api
+    # STDIO MCP is typically launched by the host, not compose.
+    # This service is useful for health/CLI smoke inside the network:
+    entrypoint: ["python", "-m", "src.server"]
+    command: ["health"]
+    profiles: ["tools"]
