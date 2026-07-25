@@ -24,7 +24,7 @@ Two public bases are tried automatically:
 
 Set `WEB_CHECK_BASE_URL` explicitly to skip probing. Fallback auto-enables when base starts with `https://web-check.` and can be forced via `WebCheckClient(fallback=True)`.
 
-No key, no auth. LO confirms UI works fine; the agent wrapper mirrors that.
+No key, no auth.
 
 ## Self-host (optional)
 
@@ -35,12 +35,21 @@ docker run -d --name web-check -p 3000:3000 lissy93/web-check
 export WEB_CHECK_BASE_URL=http://127.0.0.1:3000/api
 ```
 
+Or compose (upstream + thin MCP image):
+
+```bash
+docker compose up -d web-check
+# MCP stdio still launched by host; see Dockerfile ENTRYPOINT
+```
+
 Upstream Go rewrite [`xray-web/web-check-api`](https://github.com/xray-web/web-check-api) is early WIP — prefer Node/Docker image for full endpoint parity.
 
 ## Quick Start
 
 ```bash
-cd products/web-check-mcp
+# from repo root
+pip install -e .
+# or: python3 -m pip install web-check-mcp
 
 # Manifest
 python3 -m src.server --manifest
@@ -79,7 +88,7 @@ print(client.check_one("ssl", "example.com"))
     "web-check": {
       "command": "python3",
       "args": ["-m", "src.server", "--stdio"],
-      "cwd": "/absolute/path/to/products/web-check-mcp",
+      "cwd": "/absolute/path/to/web-check-mcp",
       "env": {
         "WEB_CHECK_BASE_URL": "http://127.0.0.1:3000/api"
       }
