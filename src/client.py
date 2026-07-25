@@ -69,7 +69,7 @@ CHECK_GROUPS: Dict[str, List[str]] = {
     "all": sorted(CHECKS.keys()),
 }
 
-DEFAULT_BASE_URL = os.environ.get("WEB_CHECK_BASE_URL", "http://127.0.0.1:3000/api")
+DEFAULT_BASE_URL = os.environ.get("WEB_CHECK_BASE_URL", "https://web-check.as93.net/api")
 DEFAULT_TIMEOUT = int(os.environ.get("WEB_CHECK_TIMEOUT", "25"))
 DEFAULT_MAX_WORKERS = int(os.environ.get("WEB_CHECK_MAX_WORKERS", "6"))
 DEFAULT_MAX_CHARS = int(os.environ.get("WEB_CHECK_MAX_CHARS", "12000"))

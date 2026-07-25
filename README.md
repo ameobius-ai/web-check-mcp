@@ -1,5 +1,10 @@
 # Web Check MCP
 
+[![PyPI](https://img.shields.io/pypi/v/web-check-mcp)](https://pypi.org/project/web-check-mcp/)
+[![Python](https://img.shields.io/pypi/pyversions/web-check-mcp)](https://pypi.org/project/web-check-mcp/)
+[![CI](https://github.com/AMEOBIUS-space/web-check-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/AMEOBIUS-space/web-check-mcp/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 > Agent wrapper for [Lissy93/web-check](https://github.com/Lissy93/web-check) — 31 OSINT checks as MCP tools + CLI.
 
 Gap verified 2026-07-25: no public MCP/SDK/Hermes skill existed for this API. This package fills it.
