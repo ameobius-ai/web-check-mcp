@@ -26,7 +26,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.client import CHECK_GROUPS, PUBLIC_BASE_URLS, WebCheckClient  # noqa: E402
+from src.client import CHECK_GROUPS, PUBLIC_BASE_URLS, WebCheckClient
 
 DEFAULT_TARGET = "https://example.com"
 DEFAULT_CHECKS = ["get-ip", "status", "headers"]
