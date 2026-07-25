@@ -1,0 +1,2 @@
+# no third-party deps — stdlib only
+# pytest is dev-only

@@ -1,0 +1,107 @@
+# Web Check MCP
+
+> Agent wrapper for [Lissy93/web-check](https://github.com/Lissy93/web-check) — 31 OSINT checks as MCP tools + CLI.
+
+Gap verified 2026-07-25: no public MCP/SDK/Hermes skill existed for this API. This package fills it.
+
+## Features
+
+- **8 MCP tools**: `webcheck_run`, `webcheck_ssl`, `webcheck_dns`, `webcheck_security`, `webcheck_headers`, `webcheck_whois`, `webcheck_list_checks`, `webcheck_health`
+- **31 OpenAPI checks** from upstream (`ssl`, `dns`, `headers`, `ports`, `firewall`, `whois`, …)
+- **Presets**: `quick` | `security` | `server` | `quality` | `heavy` | `all`
+- **Parallel fan-out** + **payload truncation** (agent-context safe)
+- **Zero pip deps** — Python 3.10+ stdlib only
+- **STDIO JSON-RPC** with `initialize` handshake + tool annotations (`readOnlyHint` + `openWorldHint`)
+
+## Important: self-host the API
+
+Public `https://web-check.xyz/api` often returns **403** from datacenter IPs.
+
+```bash
+docker run -d --name web-check -p 3000:3000 lissy93/web-check
+export WEB_CHECK_BASE_URL=http://127.0.0.1:3000/api
+```
+
+Optional: `DISABLE_GUI=true` for API-only.
+
+Upstream Go rewrite [`xray-web/web-check-api`](https://github.com/xray-web/web-check-api) is early WIP — prefer Node/Docker image for full endpoint parity.
+
+## Quick Start
+
+```bash
+cd products/web-check-mcp
+
+# Manifest
+python3 -m src.server --manifest
+
+# List checks
+python3 -m src.server list --group quick
+
+# Health probe
+python3 -m src.server health
+
+# Run quick recon (needs live API)
+python3 -m src.server run example.com --group quick
+
+# Single check
+python3 -m src.server check ssl example.com
+
+# MCP STDIO (Claude Desktop / Hermes / Cursor)
+python3 -m src.server --stdio
+```
+
+### Library
+
+```python
+from src.client import WebCheckClient
+
+client = WebCheckClient(base_url="http://127.0.0.1:3000/api")
+print(client.run("example.com", group="quick"))
+print(client.check_one("ssl", "example.com"))
+```
+
+## MCP client config
+
+```json
+{
+  "mcpServers": {
+    "web-check": {
+      "command": "python3",
+      "args": ["-m", "src.server", "--stdio"],
+      "cwd": "/absolute/path/to/products/web-check-mcp",
+      "env": {
+        "WEB_CHECK_BASE_URL": "http://127.0.0.1:3000/api"
+      }
+    }
+  }
+}
+```
+
+## Tool Reference
+
+| Tool | Description |
+|------|-------------|
+| `webcheck_list_checks` | Catalog of endpoints / groups |
+| `webcheck_health` | Probe API base reachability |
+| `webcheck_run` | Parallel multi-check (default group=`quick`) |
+| `webcheck_ssl` | Certificate chain |
+| `webcheck_dns` | DNS records |
+| `webcheck_security` | Security preset bundle |
+| `webcheck_headers` | HTTP headers |
+| `webcheck_whois` | Domain WHOIS |
+
+Env: `WEB_CHECK_BASE_URL`, `WEB_CHECK_TIMEOUT`, `WEB_CHECK_MAX_WORKERS`, `WEB_CHECK_MAX_CHARS`.
+
+## Tests
+
+```bash
+python3 -m pytest tests/ -v
+```
+
+All network paths mocked — no live API required for CI.
+
+## License
+
+MIT. Upstream Web Check © Alicia Sykes, MIT.
+
+Not affiliated with Lissy93; thin agent-facing client only.
