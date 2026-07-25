@@ -45,3 +45,5 @@ Or from source:
   }
 }
 ```
+
+Hermes YAML equivalent and agent procedure: see [`skills/security/web-check-mcp/SKILL.md`](../skills/security/web-check-mcp/SKILL.md).
