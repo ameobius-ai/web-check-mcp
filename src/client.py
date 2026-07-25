@@ -12,12 +12,12 @@ import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
-
+from typing import Any
 
 # Full OpenAPI path set from lissy93/web-check public/resources/openapi-spec.yml
-CHECKS: Dict[str, Dict[str, str]] = {
+CHECKS: dict[str, dict[str, str]] = {
     "archives": {"path": "/archives", "group": "quality", "summary": "Wayback archive first/last scan"},
     "block-lists": {"path": "/block-lists", "group": "security", "summary": "Blocklist membership"},
     "carbon": {"path": "/carbon", "group": "quality", "summary": "Carbon footprint estimate"},
@@ -51,7 +51,7 @@ CHECKS: Dict[str, Dict[str, str]] = {
     "whois": {"path": "/whois", "group": "server", "summary": "WHOIS / RDAP domain info"},
 }
 
-CHECK_GROUPS: Dict[str, List[str]] = {
+CHECK_GROUPS: dict[str, list[str]] = {
     "quick": ["get-ip", "status", "headers", "dns", "ssl", "redirects"],
     "security": [
         "ssl", "tls", "hsts", "http-security", "firewall", "dnssec",
@@ -117,7 +117,7 @@ def truncate_payload(data: Any, max_chars: int = DEFAULT_MAX_CHARS) -> Any:
         return data
     # Prefer shrinking large strings / lists
     if isinstance(data, dict):
-        out: Dict[str, Any] = {}
+        out: dict[str, Any] = {}
         budget = max_chars
         for k, v in data.items():
             piece = truncate_payload(v, max(500, budget // max(1, len(data))))
@@ -134,7 +134,7 @@ def truncate_payload(data: Any, max_chars: int = DEFAULT_MAX_CHARS) -> Any:
         out["_original_chars"] = len(raw)
         return out
     if isinstance(data, list):
-        kept: List[Any] = []
+        kept: list[Any] = []
         size = 2
         for item in data:
             enc = json.dumps(item, ensure_ascii=False, default=str)
@@ -170,8 +170,8 @@ class WebCheckClient:
         max_workers: int = DEFAULT_MAX_WORKERS,
         max_chars: int = DEFAULT_MAX_CHARS,
         verify_ssl: bool = True,
-        opener: Optional[Callable[..., Any]] = None,
-        fallback: Optional[bool] = None,
+        opener: Callable[..., Any] | None = None,
+        fallback: bool | None = None,
     ):
         self.base_url = _normalize_base(base_url)
         self.timeout = timeout
@@ -184,9 +184,9 @@ class WebCheckClient:
         self.fallback = bool(fallback) if fallback is not None else (
             self.base_url.startswith("https://web-check.")
         )
-        self._resolved_base: Optional[str] = None
+        self._resolved_base: str | None = None
 
-    def list_checks(self, group: Optional[str] = None) -> List[Dict[str, str]]:
+    def list_checks(self, group: str | None = None) -> list[dict[str, str]]:
         if group:
             keys = CHECK_GROUPS.get(group)
             if keys is None:
@@ -208,11 +208,11 @@ class WebCheckClient:
 
     def resolve_checks(
         self,
-        checks: Optional[Sequence[str]] = None,
-        group: Optional[str] = None,
-    ) -> List[str]:
+        checks: Sequence[str] | None = None,
+        group: str | None = None,
+    ) -> list[str]:
         if checks:
-            out: List[str] = []
+            out: list[str] = []
             for c in checks:
                 name = c.strip().lstrip("/")
                 if name not in CHECKS:
@@ -227,7 +227,7 @@ class WebCheckClient:
             return list(keys)
         return list(CHECK_GROUPS["quick"])
 
-    def _ssl_context(self) -> Optional[ssl.SSLContext]:
+    def _ssl_context(self) -> ssl.SSLContext | None:
         if self.verify_ssl:
             return None  # default verification
         ctx = ssl.create_default_context()
@@ -235,7 +235,7 @@ class WebCheckClient:
         ctx.verify_mode = ssl.CERT_NONE
         return ctx
 
-    def _http_get(self, url: str) -> Tuple[int, Any, Optional[str]]:
+    def _http_get(self, url: str) -> tuple[int, Any, str | None]:
         req = urllib.request.Request(
             url,
             headers={
@@ -276,13 +276,13 @@ class WebCheckClient:
             except json.JSONDecodeError:
                 payload = {"error": body or str(e.reason)}
             return int(e.code), payload, f"HTTP {e.code}"
-        except Exception as e:  # noqa: BLE001 — surface to agent as structured error
+        except Exception as e:
             return 0, {"error": str(e)}, str(e)
 
-    def _candidate_bases(self) -> List[str]:
+    def _candidate_bases(self) -> list[str]:
         """Bases to try, primary first. De-duplicates normalized forms."""
         seen: set = set()
-        out: List[str] = []
+        out: list[str] = []
         primary = _normalize_base(self.base_url)
         for b in [primary] + (list(PUBLIC_BASE_URLS) if self.fallback else []):
             nb = _normalize_base(b)
@@ -302,7 +302,7 @@ class WebCheckClient:
                 return True
         return False
 
-    def check_one(self, check: str, url: str) -> Dict[str, Any]:
+    def check_one(self, check: str, url: str) -> dict[str, Any]:
         name = check.strip().lstrip("/")
         if name not in CHECKS:
             return {
@@ -321,8 +321,8 @@ class WebCheckClient:
         if self._resolved_base and self._resolved_base in bases:
             bases = [self._resolved_base] + [b for b in bases if b != self._resolved_base]
 
-        last: Dict[str, Any] = {}
-        used_base: Optional[str] = None
+        last: dict[str, Any] = {}
+        used_base: str | None = None
         for base in bases:
             endpoint = f"{base}{path}?{qs}"
             status, data, err = self._http_get(endpoint)
@@ -353,14 +353,14 @@ class WebCheckClient:
     def run(
         self,
         url: str,
-        checks: Optional[Sequence[str]] = None,
-        group: Optional[str] = None,
-        max_workers: Optional[int] = None,
-    ) -> Dict[str, Any]:
+        checks: Sequence[str] | None = None,
+        group: str | None = None,
+        max_workers: int | None = None,
+    ) -> dict[str, Any]:
         target = _normalize_target(url)
         names = self.resolve_checks(checks=checks, group=group)
         workers = max(1, max_workers or self.max_workers)
-        results: Dict[str, Dict[str, Any]] = {}
+        results: dict[str, dict[str, Any]] = {}
 
         if len(names) == 1:
             results[names[0]] = self.check_one(names[0], target)
@@ -371,7 +371,7 @@ class WebCheckClient:
                     name = futs[fut]
                     try:
                         results[name] = fut.result()
-                    except Exception as e:  # noqa: BLE001
+                    except Exception as e:
                         results[name] = {
                             "check": name,
                             "ok": False,
@@ -394,7 +394,7 @@ class WebCheckClient:
             "results": ordered,
         }
 
-    def health(self) -> Dict[str, Any]:
+    def health(self) -> dict[str, Any]:
         """Probe base URL reachability via get-ip on example.com.
 
         With fallback enabled, tries PUBLIC_BASE_URLS in order and reports

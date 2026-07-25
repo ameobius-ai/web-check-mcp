@@ -4,8 +4,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from typing import Any, Dict, Tuple
-from unittest.mock import MagicMock
+from typing import Any
 
 import pytest
 
@@ -14,17 +13,16 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from src.client import CHECK_GROUPS, CHECKS, WebCheckClient, truncate_payload
 from src.server import TOOL_DEFS, WebCheckMCPServer, _cli
 
-
 # ── fixtures ──────────────────────────────────────────────────────────────
 
-def _ok_payload(check: str) -> Dict[str, Any]:
+def _ok_payload(check: str) -> dict[str, Any]:
     return {"check": check, "ok": True, "sample": True, "value": "x" * 20}
 
 
 class FakeOpener:
     """Callable opener: returns (status, body) based on URL path."""
 
-    def __init__(self, mapping: Dict[str, Tuple[int, Any]] | None = None, default_status: int = 200):
+    def __init__(self, mapping: dict[str, tuple[int, Any]] | None = None, default_status: int = 200):
         self.mapping = mapping or {}
         self.default_status = default_status
         self.calls = []

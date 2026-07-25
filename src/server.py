@@ -14,7 +14,7 @@ import argparse
 import json
 import os
 import sys
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from . import __version__
 from .client import (
@@ -36,10 +36,10 @@ _READ_OPEN = {
 def _tool(
     name: str,
     description: str,
-    properties: Dict[str, Any],
-    required: Optional[List[str]] = None,
-) -> Dict[str, Any]:
-    schema: Dict[str, Any] = {
+    properties: dict[str, Any],
+    required: list[str] | None = None,
+) -> dict[str, Any]:
+    schema: dict[str, Any] = {
         "type": "object",
         "properties": properties,
     }
@@ -65,7 +65,7 @@ _MAX_CHARS_PROP = {
     "default": DEFAULT_MAX_CHARS,
 }
 
-TOOL_DEFS: List[Dict[str, Any]] = [
+TOOL_DEFS: list[dict[str, Any]] = [
     _tool(
         "webcheck_list_checks",
         "List available Web Check endpoints/groups (ssl, dns, headers, ports, …).",
@@ -152,7 +152,7 @@ class WebCheckMCPServer:
         self,
         name: str = "web-check-mcp",
         version: str = __version__,
-        default_base_url: Optional[str] = None,
+        default_base_url: str | None = None,
     ):
         self.name = name
         self.version = version
@@ -160,10 +160,10 @@ class WebCheckMCPServer:
             "WEB_CHECK_BASE_URL", DEFAULT_BASE_URL
         )
 
-    def list_tools(self) -> List[Dict]:
+    def list_tools(self) -> list[dict]:
         return TOOL_DEFS
 
-    def manifest(self) -> Dict:
+    def manifest(self) -> dict:
         return {
             "server": {"name": self.name, "version": self.version},
             "capabilities": {"tools": {"listChanged": True}, "resources": {}, "prompts": {}},
@@ -175,7 +175,7 @@ class WebCheckMCPServer:
             },
         }
 
-    def _client(self, args: Dict[str, Any]) -> WebCheckClient:
+    def _client(self, args: dict[str, Any]) -> WebCheckClient:
         return WebCheckClient(
             base_url=args.get("base_url") or self.default_base_url,
             timeout=int(args.get("timeout") or DEFAULT_TIMEOUT),
@@ -183,7 +183,7 @@ class WebCheckMCPServer:
             max_chars=int(args.get("max_chars") or DEFAULT_MAX_CHARS),
         )
 
-    def handle_tool_call(self, name: str, args: Dict[str, Any]) -> str:
+    def handle_tool_call(self, name: str, args: dict[str, Any]) -> str:
         args = args or {}
         try:
             if name == "webcheck_list_checks":
@@ -195,7 +195,7 @@ class WebCheckMCPServer:
                         "group": group or "all",
                         "count": len(items),
                         "checks": items,
-                        "groups": {k: v for k, v in CHECK_GROUPS.items()},
+                        "groups": dict(CHECK_GROUPS),
                     },
                     ensure_ascii=False,
                 )
@@ -240,7 +240,7 @@ class WebCheckMCPServer:
             return json.dumps({"error": f"Unknown tool: {name}"})
         except KeyError as e:
             return json.dumps({"error": f"Missing required parameter: {e}", "tool": name})
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             return json.dumps({"error": str(e), "tool": name})
 
 
@@ -311,7 +311,7 @@ def _run_stdio() -> None:
         print(json.dumps(response), flush=True)
 
 
-def _cli(argv: Optional[List[str]] = None) -> int:
+def _cli(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="web-check-mcp — agent wrapper for Lissy93 Web Check API"
     )
@@ -331,7 +331,7 @@ def _cli(argv: Optional[List[str]] = None) -> int:
     p_list = sub.add_parser("list", help="List checks")
     p_list.add_argument("--group", default=None)
 
-    p_health = sub.add_parser("health", help="Probe API base")
+    sub.add_parser("health", help="Probe API base")
 
     p_run = sub.add_parser("run", help="Run checks against a URL")
     p_run.add_argument("url")
