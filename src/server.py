@@ -4,7 +4,7 @@ Wraps WebCheckClient in Model Context Protocol tools.
 Zero third-party deps (Python stdlib only).
 
 Modes:
-  python -m src.server --stdio      # JSON-RPC over stdin/stdout
+  python -m src.server --stdio      # JSON-RPC over stdin/stdout (dual-mode)
   python -m src.server --manifest   # print tool manifest
   python -m src.server --cli ...    # CLI (see argparse)
 """
@@ -153,12 +153,21 @@ class WebCheckMCPServer:
         name: str = "web-check-mcp",
         version: str = __version__,
         default_base_url: str | None = None,
+        # Kept for test-injection compatibility (used by TestMCPServer).
+        opener: Any = None,
+        fallback: bool | None = None,
     ):
         self.name = name
         self.version = version
         self.default_base_url = default_base_url or os.environ.get(
             "WEB_CHECK_BASE_URL", DEFAULT_BASE_URL
         )
+        self._opener = opener
+        self._fallback = fallback
+
+    def tools(self) -> list[dict]:
+        """Alias for list_tools() used by tests."""
+        return self.list_tools()
 
     def list_tools(self) -> list[dict]:
         return TOOL_DEFS
@@ -181,16 +190,29 @@ class WebCheckMCPServer:
             timeout=int(args.get("timeout") or DEFAULT_TIMEOUT),
             max_workers=int(args.get("max_workers") or 6),
             max_chars=int(args.get("max_chars") or DEFAULT_MAX_CHARS),
+            opener=self._opener,
+            fallback=self._fallback,
         )
 
     def handle_tool_call(self, name: str, args: dict[str, Any]) -> str:
+        """Alias kept for backward-compat; delegates to call_tool."""
+        return "\n".join(
+            item.get("text", "") if isinstance(item, dict) else str(item)
+            for item in self.call_tool(name, args)
+        )
+
+    def call_tool(self, name: str, args: dict[str, Any]) -> list[dict[str, Any]]:
         args = args or {}
         try:
             if name == "webcheck_list_checks":
-                client = WebCheckClient(base_url=self.default_base_url)
+                client = WebCheckClient(
+                    base_url=self.default_base_url,
+                    opener=self._opener,
+                    fallback=self._fallback,
+                )
                 group = args.get("group")
                 items = client.list_checks(group=group)
-                return json.dumps(
+                text = json.dumps(
                     {
                         "group": group or "all",
                         "count": len(items),
@@ -199,10 +221,11 @@ class WebCheckMCPServer:
                     },
                     ensure_ascii=False,
                 )
+                return [{"type": "text", "text": text}]
 
             if name == "webcheck_health":
                 client = self._client(args)
-                return json.dumps(client.health(), ensure_ascii=False)
+                return [{"type": "text", "text": json.dumps(client.health(), ensure_ascii=False)}]
 
             if name == "webcheck_run":
                 client = self._client(args)
@@ -212,110 +235,55 @@ class WebCheckMCPServer:
                     group=args.get("group") or ("quick" if not args.get("checks") else None),
                     max_workers=args.get("max_workers"),
                 )
-                return json.dumps(result, ensure_ascii=False)
+                return [{"type": "text", "text": json.dumps(result, ensure_ascii=False)}]
 
             if name == "webcheck_ssl":
                 client = self._client(args)
-                return json.dumps(client.check_one("ssl", args["url"]), ensure_ascii=False)
+                return [{"type": "text", "text": json.dumps(client.check_one("ssl", args["url"]), ensure_ascii=False)}]
 
             if name == "webcheck_dns":
                 client = self._client(args)
-                return json.dumps(client.check_one("dns", args["url"]), ensure_ascii=False)
+                return [{"type": "text", "text": json.dumps(client.check_one("dns", args["url"]), ensure_ascii=False)}]
 
             if name == "webcheck_security":
                 client = self._client(args)
-                return json.dumps(
+                return [{"type": "text", "text": json.dumps(
                     client.run(url=args["url"], group="security", max_workers=args.get("max_workers")),
                     ensure_ascii=False,
-                )
+                )}]
 
             if name == "webcheck_headers":
                 client = self._client(args)
-                return json.dumps(client.check_one("headers", args["url"]), ensure_ascii=False)
+                return [{"type": "text", "text": json.dumps(client.check_one("headers", args["url"]), ensure_ascii=False)}]
 
             if name == "webcheck_whois":
                 client = self._client(args)
-                return json.dumps(client.check_one("whois", args["url"]), ensure_ascii=False)
+                return [{"type": "text", "text": json.dumps(client.check_one("whois", args["url"]), ensure_ascii=False)}]
 
-            return json.dumps({"error": f"Unknown tool: {name}"})
+            return [{"type": "text", "text": json.dumps({"error": f"Unknown tool: {name}"})}]
         except KeyError as e:
-            return json.dumps({"error": f"Missing required parameter: {e}", "tool": name})
+            return [{"type": "text", "text": json.dumps({"error": f"Missing required parameter: {e}", "tool": name})}]
         except Exception as e:
-            return json.dumps({"error": str(e), "tool": name})
+            return [{"type": "text", "text": json.dumps({"error": str(e), "tool": name})}]
 
 
 def _run_stdio() -> None:
-    server = WebCheckMCPServer()
-    for line in sys.stdin:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            request = json.loads(line)
-        except json.JSONDecodeError:
-            print(
-                json.dumps(
-                    {"jsonrpc": "2.0", "error": {"code": -32700, "message": "Parse error"}}
-                ),
-                flush=True,
-            )
-            continue
+    """Delegate to the dual-mode stdio transport in src.stdio (WC-010).
 
-        method = request.get("method", "")
-        req_id = request.get("id")
-        params = request.get("params") or {}
+    The old NDJSON-only loop that lived here is superseded by
+    ``src.stdio.run_stdio`` which auto-detects Content-Length vs NDJSON
+    framing per message and has 18 dedicated unit tests.
+    """
+    from .stdio import run_stdio  # lazy import — keeps server.py self-contained
 
-        if method == "initialize":
-            response = {
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "result": {
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {"tools": {"listChanged": True}},
-                    "serverInfo": {"name": server.name, "version": server.version},
-                },
-            }
-        elif method == "notifications/initialized":
-            # notification — no response required, but some clients expect ack
-            if req_id is None:
-                continue
-            response = {"jsonrpc": "2.0", "id": req_id, "result": {}}
-        elif method == "tools/list":
-            response = {
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "result": {"tools": server.list_tools()},
-            }
-        elif method == "tools/call":
-            tool_name = params.get("name", "")
-            tool_args = params.get("arguments") or {}
-            result = server.handle_tool_call(tool_name, tool_args)
-            response = {
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "result": {"content": [{"type": "text", "text": result}]},
-            }
-        elif method == "ping":
-            response = {"jsonrpc": "2.0", "id": req_id, "result": {}}
-        elif method == "shutdown":
-            response = {"jsonrpc": "2.0", "id": req_id, "result": {}}
-            print(json.dumps(response), flush=True)
-            break
-        else:
-            response = {
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "error": {"code": -32601, "message": f"Method not found: {method}"},
-            }
-
-        print(json.dumps(response), flush=True)
+    run_stdio()
 
 
 def _cli(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="web-check-mcp — agent wrapper for Lissy93 Web Check API"
     )
-    parser.add_argument("--stdio", action="store_true", help="STDIO JSON-RPC MCP mode")
+    parser.add_argument("--stdio", action="store_true", help="STDIO JSON-RPC MCP mode (dual-mode framing)")
     parser.add_argument("--manifest", action="store_true", help="Print MCP manifest JSON")
     parser.add_argument(
         "--base-url",
@@ -378,8 +346,8 @@ def _cli(argv: list[str] | None = None) -> int:
     return 1
 
 
-def main() -> None:
-    raise SystemExit(_cli())
+def main(argv: list[str] | None = None) -> None:
+    raise SystemExit(_cli(argv))
 
 
 if __name__ == "__main__":
