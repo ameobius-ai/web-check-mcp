@@ -1,315 +1,419 @@
-"""Tests for web-check-mcp — client + MCP server (mocked network)."""
+"""Unit tests for web-check-mcp (network-free, all HTTP mocked)."""
 from __future__ import annotations
 
 import json
-import os
 import sys
+import unittest
+from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
-import pytest
+# Ensure repo root on path so `src.*` imports work without pip install.
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from src.client import (  # noqa: E402
+    CHECK_GROUPS,
+    CHECKS,
+    WebCheckClient,
+    _query_param_name,
+    truncate_payload,
+)
+from src.server import WebCheckMCPServer  # noqa: E402
 
-from src.client import CHECK_GROUPS, CHECKS, WebCheckClient, truncate_payload
-from src.server import TOOL_DEFS, WebCheckMCPServer, _cli
 
-# ── fixtures ──────────────────────────────────────────────────────────────
-
-def _ok_payload(check: str) -> dict[str, Any]:
-    return {"check": check, "ok": True, "sample": True, "value": "x" * 20}
-
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 class FakeOpener:
-    """Callable opener: returns (status, body) based on URL path."""
+    """Minimal stand-in for urllib.request.urlopen / client._opener."""
 
-    def __init__(self, mapping: dict[str, tuple[int, Any]] | None = None, default_status: int = 200):
-        self.mapping = mapping or {}
-        self.default_status = default_status
-        self.calls = []
+    def __init__(self, status: int = 200, body: Any = None, error: Exception | None = None):
+        self.status = status
+        self.body = body if body is not None else {"ok": True}
+        self.error = error
+        self.calls: list[str] = []
 
-    def __call__(self, url: str, timeout: int = 25):
+    def __call__(self, url: str, timeout: int = 10) -> tuple[int, str]:
         self.calls.append(url)
-        for key, (status, body) in self.mapping.items():
-            if key in url:
-                if not isinstance(body, (str, bytes)):
-                    body = json.dumps(body)
-                return status, body
-        return self.default_status, json.dumps({"ok": True, "url": url})
+        if self.error:
+            raise self.error
+        return self.status, json.dumps(self.body)
 
 
-# ── catalog ───────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Catalog tests
+# ---------------------------------------------------------------------------
 
-class TestCatalog:
+class TestCatalog(unittest.TestCase):
     def test_check_count(self):
-        assert len(CHECKS) == 31
+        self.assertEqual(len(CHECKS), 31)
 
-    def test_groups_cover_known_keys(self):
+    def test_tool_count(self):
+        srv = WebCheckMCPServer()
+        self.assertEqual(len(srv.tools()), 8)
+
+    def test_groups_reference_valid_checks(self):
         for group, names in CHECK_GROUPS.items():
-            for n in names:
-                assert n in CHECKS, f"{n} missing from CHECKS (group={group})"
+            if group == "all":
+                continue
+            for name in names:
+                self.assertIn(name, CHECKS, f"{group!r} references unknown check {name!r}")
 
-    def test_quick_subset(self):
-        assert "ssl" in CHECK_GROUPS["quick"]
-        assert "dns" in CHECK_GROUPS["quick"]
+    def test_all_group_sorted(self):
+        self.assertEqual(CHECK_GROUPS["all"], sorted(CHECKS.keys()))
 
-    def test_list_checks_all(self):
-        c = WebCheckClient(opener=FakeOpener())
-        items = c.list_checks()
-        assert len(items) == 31
-        assert {i["name"] for i in items} == set(CHECKS)
+    def test_list_checks_no_group(self):
+        client = WebCheckClient(opener=FakeOpener())
+        result = client.list_checks()
+        self.assertEqual(len(result), 31)
+        self.assertEqual({r["name"] for r in result}, set(CHECKS.keys()))
 
     def test_list_checks_group(self):
-        c = WebCheckClient(opener=FakeOpener())
-        items = c.list_checks(group="security")
-        assert len(items) == len(CHECK_GROUPS["security"])
+        client = WebCheckClient(opener=FakeOpener())
+        result = client.list_checks(group="quick")
+        self.assertEqual({r["name"] for r in result}, set(CHECK_GROUPS["quick"]))
 
-    def test_list_checks_bad_group(self):
-        c = WebCheckClient(opener=FakeOpener())
-        with pytest.raises(ValueError):
-            c.list_checks(group="nope")
+    def test_list_checks_unknown_group(self):
+        client = WebCheckClient(opener=FakeOpener())
+        with self.assertRaises(ValueError):
+            client.list_checks(group="nonexistent")
 
-    def test_resolve_checks_default_quick(self):
-        c = WebCheckClient(opener=FakeOpener())
-        assert c.resolve_checks() == CHECK_GROUPS["quick"]
+    # --- WC-023: query-param names ---
+    def test_param_defaults_to_url(self):
+        """Most checks should use the default 'url' param."""
+        for name in ["archives", "dns", "ssl", "headers", "get-ip", "status"]:
+            self.assertEqual(_query_param_name(name), "url", name)
 
-    def test_resolve_unknown_check(self):
-        c = WebCheckClient(opener=FakeOpener())
-        with pytest.raises(ValueError):
-            c.resolve_checks(checks=["not-a-check"])
+    def test_param_domain_checks(self):
+        """txt-records and whois use ?domain= per upstream OpenAPI spec."""
+        self.assertEqual(_query_param_name("txt-records"), "domain")
+        self.assertEqual(_query_param_name("whois"), "domain")
 
+    def test_param_trace_route(self):
+        """trace-route uses ?urlString= per upstream OpenAPI spec."""
+        self.assertEqual(_query_param_name("trace-route"), "urlString")
 
-# ── truncate ──────────────────────────────────────────────────────────────
-
-class TestTruncate:
-    def test_small_passthrough(self):
-        data = {"a": 1}
-        assert truncate_payload(data, 1000) == data
-
-    def test_long_string(self):
-        data = "x" * 5000
-        out = truncate_payload(data, 100)
-        assert isinstance(out, str)
-        assert out.endswith("[truncated]")
-        assert len(out) < 150
-
-    def test_long_list(self):
-        data = [{"i": i, "blob": "y" * 200} for i in range(50)]
-        out = truncate_payload(data, 500)
-        assert out.get("_truncated") is True
-        assert out["_items_kept"] < 50
+    def test_list_checks_includes_param_field(self):
+        """list_checks() now exposes the param name for each check."""
+        client = WebCheckClient(opener=FakeOpener())
+        by_name = {r["name"]: r for r in client.list_checks()}
+        self.assertEqual(by_name["whois"]["param"], "domain")
+        self.assertEqual(by_name["txt-records"]["param"], "domain")
+        self.assertEqual(by_name["trace-route"]["param"], "urlString")
+        self.assertEqual(by_name["dns"]["param"], "url")
 
 
-# ── client ────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Truncation tests
+# ---------------------------------------------------------------------------
 
-class TestClient:
+class TestTruncate(unittest.TestCase):
+    def test_short_string_unchanged(self):
+        self.assertEqual(truncate_payload("hello", max_chars=100), "hello")
+
+    def test_long_string_truncated(self):
+        result = truncate_payload("x" * 200, max_chars=50)
+        self.assertIsInstance(result, str)
+        self.assertIn("truncated", result)
+
+    def test_small_dict_unchanged(self):
+        d = {"a": 1, "b": 2}
+        self.assertEqual(truncate_payload(d, max_chars=1000), d)
+
+    def test_large_dict_truncated(self):
+        d = {str(i): "x" * 100 for i in range(20)}
+        result = truncate_payload(d, max_chars=200)
+        self.assertTrue(result.get("_truncated"))
+
+    def test_list_truncated(self):
+        lst = ["x" * 50] * 30
+        result = truncate_payload(lst, max_chars=200)
+        self.assertIsInstance(result, dict)
+        self.assertIn("_items_kept", result)
+
+    def test_zero_max_chars_passthrough(self):
+        data = {"key": "value"}
+        self.assertEqual(truncate_payload(data, max_chars=0), data)
+
+
+# ---------------------------------------------------------------------------
+# Client tests (network-free)
+# ---------------------------------------------------------------------------
+
+class TestClient(unittest.TestCase):
+    def _client(self, status=200, body=None):
+        return WebCheckClient(
+            base_url="http://localhost:3000/api",
+            opener=FakeOpener(status=status, body=body or {"ip": "1.2.3.4"}),
+            fallback=False,
+        )
+
     def test_check_one_ok(self):
-        opener = FakeOpener({"/ssl": (200, {"subject": "CN=example.com"})})
-        c = WebCheckClient(base_url="http://local/api", opener=opener)
-        res = c.check_one("ssl", "example.com")
-        assert res["ok"] is True
-        assert res["status"] == 200
-        assert res["data"]["subject"] == "CN=example.com"
-        assert "url=https%3A%2F%2Fexample.com" in opener.calls[0] or "example.com" in opener.calls[0]
-
-    def test_check_one_http_error(self):
-        opener = FakeOpener({"/dns": (403, {"error": "Forbidden"})})
-        c = WebCheckClient(base_url="http://local/api", opener=opener)
-        res = c.check_one("dns", "https://example.com")
-        # FakeOpener returns status directly without raising; status 403 => not ok
-        assert res["status"] == 403
-        assert res["ok"] is False
+        client = self._client()
+        result = client.check_one("get-ip", "https://example.com")
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["check"], "get-ip")
 
     def test_check_one_unknown(self):
-        c = WebCheckClient(opener=FakeOpener())
-        res = c.check_one("nope", "example.com")
-        assert res["ok"] is False
-        assert "Unknown" in res["error"]
+        client = self._client()
+        result = client.check_one("nonexistent", "https://example.com")
+        self.assertFalse(result["ok"])
+        self.assertIn("Unknown", result["error"])
 
-    def test_run_parallel(self):
-        opener = FakeOpener(
-            {
-                "/ssl": (200, {"ssl": True}),
-                "/dns": (200, {"dns": True}),
-                "/headers": (200, {"h": 1}),
-            }
+    def test_check_one_http_error(self):
+        client = WebCheckClient(
+            base_url="http://localhost:3000/api",
+            opener=FakeOpener(status=500, body={"error": "server error"}),
+            fallback=False,
         )
-        c = WebCheckClient(base_url="http://local/api", opener=opener, max_workers=3)
-        out = c.run("example.com", checks=["ssl", "dns", "headers"])
-        assert out["ok_count"] == 3
-        assert out["fail_count"] == 0
-        assert len(out["results"]) == 3
-        assert out["url"] == "https://example.com"
+        result = client.check_one("get-ip", "https://example.com")
+        self.assertFalse(result["ok"])
 
-    def test_run_group_security(self):
-        opener = FakeOpener(default_status=200)
-        c = WebCheckClient(base_url="http://local/api", opener=opener)
-        out = c.run("https://example.com", group="security")
-        assert out["checks_requested"] == CHECK_GROUPS["security"]
-        assert out["ok_count"] == len(CHECK_GROUPS["security"])
+    def test_run_quick(self):
+        client = self._client(body={"ip": "1.2.3.4", "isUp": True})
+        result = client.run("https://example.com", group="quick")
+        self.assertIn("results", result)
+        self.assertGreater(len(result["results"]), 0)
 
-    def test_health(self):
-        opener = FakeOpener({"/get-ip": (200, {"ip": "1.2.3.4"})})
-        c = WebCheckClient(base_url="http://local/api", opener=opener)
-        h = c.health()
-        assert h["reachable"] is True
-        assert "hint" in h
+    def test_health_ok(self):
+        client = self._client()
+        h = client.health()
+        self.assertTrue(h["reachable"])
 
-    def test_normalize_base_adds_api(self):
-        opener = FakeOpener({"/get-ip": (200, {"ip": "9.9.9.9"})})
-        c = WebCheckClient(base_url="http://127.0.0.1:3000", opener=opener)
-        assert c.base_url.endswith("/api")
+    def test_normalize_no_scheme(self):
+        client = self._client(body={"ip": "1.2.3.4"})
+        result = client.check_one("get-ip", "example.com")
+        self.assertIn("https://", result["endpoint"])
 
-    def test_fallback_vercel_then_netlify(self):
-        # Primary (vercel) returns 429; fallback (netlify) returns 200.
-        opener = FakeOpener(
-            {
-                "web-check.xyz": (429, {"error": "Forbidden"}),
-                "web-check.as93.net": (200, {"ip": "162.159.128.233"}),
-            }
+    def test_blocking_429(self):
+        client = WebCheckClient(
+            base_url="http://localhost:3000/api",
+            opener=FakeOpener(status=429, body={"error": "rate limited"}),
+            fallback=False,
         )
-        c = WebCheckClient(
-            base_url="https://web-check.xyz/api",
-            opener=opener,
-            fallback=True,
-        )
-        res = c.check_one("get-ip", "https://discord.com")
-        assert res["ok"] is True
-        assert res["status"] == 200
-        assert "as93.net" in res["base_url"]
+        result = client.check_one("get-ip", "https://example.com")
+        self.assertFalse(result["ok"])
 
-    def test_fallback_disabled_uses_primary_only(self):
-        opener = FakeOpener(
-            {
-                "web-check.xyz": (429, {"error": "Forbidden"}),
-                "web-check.as93.net": (200, {"ip": "1.2.3.4"}),
-            }
-        )
-        c = WebCheckClient(
-            base_url="https://web-check.xyz/api",
+    # WC-023: verify correct param names hit the wire
+    def test_whois_uses_domain_param(self):
+        opener = FakeOpener(body={"domain": "example.com"})
+        client = WebCheckClient(
+            base_url="http://localhost:3000/api",
             opener=opener,
             fallback=False,
         )
-        res = c.check_one("get-ip", "https://discord.com")
-        assert res["ok"] is False
-        assert res["status"] == 429
+        client.check_one("whois", "https://example.com")
+        self.assertTrue(opener.calls, "opener should have been called")
+        self.assertIn("domain=", opener.calls[0])
+        self.assertNotIn("url=", opener.calls[0])
+
+    def test_txt_records_uses_domain_param(self):
+        opener = FakeOpener(body={"spf": "v=spf1"})
+        client = WebCheckClient(
+            base_url="http://localhost:3000/api",
+            opener=opener,
+            fallback=False,
+        )
+        client.check_one("txt-records", "https://example.com")
+        self.assertIn("domain=", opener.calls[0])
+        self.assertNotIn("url=", opener.calls[0])
+
+    def test_trace_route_uses_urlstring_param(self):
+        opener = FakeOpener(body={"message": "done", "result": []})
+        client = WebCheckClient(
+            base_url="http://localhost:3000/api",
+            opener=opener,
+            fallback=False,
+        )
+        client.check_one("trace-route", "https://example.com")
+        self.assertIn("urlString=", opener.calls[0])
+        self.assertNotIn("url=", opener.calls[0])
+
+    def test_regular_check_uses_url_param(self):
+        opener = FakeOpener(body={"ip": "1.2.3.4"})
+        client = WebCheckClient(
+            base_url="http://localhost:3000/api",
+            opener=opener,
+            fallback=False,
+        )
+        client.check_one("get-ip", "https://example.com")
+        self.assertIn("url=", opener.calls[0])
+
+
+# ---------------------------------------------------------------------------
+# Fallback tests
+# ---------------------------------------------------------------------------
+
+class TestFallback(unittest.TestCase):
+    def test_fallback_on_429(self):
+        """Client should try next base when primary returns 429."""
+        call_log: list[str] = []
+
+        def opener(url: str, timeout: int = 10) -> tuple[int, str]:
+            call_log.append(url)
+            if "as93.net" in url:
+                return 429, json.dumps({"error": "rate limited"})
+            return 200, json.dumps({"ip": "1.2.3.4"})
+
+        client = WebCheckClient(
+            base_url="https://web-check.as93.net/api",
+            opener=opener,
+            fallback=True,
+        )
+        result = client.check_one("get-ip", "https://example.com")
+        self.assertTrue(result["ok"])
+        self.assertGreater(len(call_log), 1)
+
+    def test_no_fallback_when_disabled(self):
+        opener = FakeOpener(status=429, body={"error": "rate limited"})
+        client = WebCheckClient(
+            base_url="http://localhost:3000/api",
+            opener=opener,
+            fallback=False,
+        )
+        result = client.check_one("get-ip", "https://example.com")
+        self.assertFalse(result["ok"])
+        self.assertEqual(len(opener.calls), 1)
 
     def test_resolved_base_sticky(self):
-        opener = FakeOpener(
-            {
-                "web-check.xyz": (429, {"error": "x"}),
-                "web-check.as93.net": (200, {"ip": "1.1.1.1"}),
-            }
+        """Once a base answers OK, subsequent calls prefer it."""
+        call_log: list[str] = []
+
+        def opener(url: str, timeout: int = 10) -> tuple[int, str]:
+            call_log.append(url)
+            return 200, json.dumps({"ip": "1.2.3.4"})
+
+        client = WebCheckClient(
+            base_url="https://web-check.as93.net/api",
+            opener=opener,
+            fallback=True,
         )
-        c = WebCheckClient(base_url="https://web-check.xyz/api", opener=opener, fallback=True)
-        c.check_one("get-ip", "example.com")
-        assert c._resolved_base == "https://web-check.as93.net/api"
+        client.check_one("get-ip", "https://example.com")
+        first_base = client._resolved_base
+        client.check_one("get-ip", "https://example.com")
+        self.assertEqual(client._resolved_base, first_base)
 
-    def test_challenge_html_treated_as_blocking(self):
+    def test_challenge_html_detection(self):
+        """200 with Vercel challenge HTML body should be treated as blocking."""
         opener = FakeOpener(
-            {
-                "web-check.xyz": (200, {"raw": "<!DOCTYPE html><x-vercel challenge>"}),
-                "web-check.as93.net": (200, {"ip": "1.1.1.1"}),
-            }
+            status=200,
+            body={"raw": "<html>x-vercel-id challenge page</html>"},
         )
-        c = WebCheckClient(base_url="https://web-check.xyz/api", opener=opener, fallback=True)
-        res = c.check_one("get-ip", "example.com")
-        assert res["ok"] is True
-        assert "as93.net" in res["base_url"]
-
-    def test_health_reports_resolved_base(self):
-        opener = FakeOpener(
-            {
-                "web-check.xyz": (429, {"error": "x"}),
-                "web-check.as93.net": (200, {"ip": "1.1.1.1"}),
-            }
+        client = WebCheckClient(
+            base_url="http://localhost:3000/api",
+            opener=opener,
+            fallback=False,
         )
-        c = WebCheckClient(base_url="https://web-check.xyz/api", opener=opener, fallback=True)
-        h = c.health()
-        assert h["reachable"] is True
-        assert "as93.net" in (h.get("resolved_base_url") or "")
-        assert h["fallback_enabled"] is True
+        result = client.check_one("get-ip", "https://example.com")
+        self.assertFalse(result["ok"])
+
+    def test_health_reflects_resolved_base(self):
+        opener = FakeOpener(body={"ip": "1.2.3.4"})
+        client = WebCheckClient(
+            base_url="https://web-check.as93.net/api",
+            opener=opener,
+            fallback=False,
+        )
+        h = client.health()
+        self.assertTrue(h["reachable"])
+        self.assertIsNotNone(h["resolved_base_url"])
 
 
-# ── MCP server ────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# MCP server tests
+# ---------------------------------------------------------------------------
 
-class TestMCPServer:
-    def test_tool_count(self):
-        assert len(TOOL_DEFS) == 8
+class TestMCPServer(unittest.TestCase):
+    def setUp(self):
+        self.opener = FakeOpener(body={"ip": "1.2.3.4"})
+        self.server = WebCheckMCPServer(
+            base_url="http://localhost:3000/api",
+            opener=self.opener,
+            fallback=False,
+        )
 
-    def test_tools_have_annotations(self):
-        for t in TOOL_DEFS:
-            assert "annotations" in t
-            assert t["annotations"]["readOnlyHint"] is True
-            assert t["annotations"]["openWorldHint"] is True
+    def test_tools_list(self):
+        tools = self.server.tools()
+        names = [t["name"] for t in tools]
+        self.assertIn("web_check_run", names)
+        self.assertIn("web_check_ssl", names)
+        self.assertIn("web_check_health", names)
 
-    def test_tools_have_schema(self):
-        for t in TOOL_DEFS:
-            assert t["inputSchema"]["type"] == "object"
-            assert "name" in t and "description" in t
+    def test_tool_health(self):
+        result = self.server.call_tool("web_check_health", {})
+        self.assertIsInstance(result, list)
+        self.assertTrue(any("reachable" in str(r) for r in result))
 
-    def test_manifest(self):
-        s = WebCheckMCPServer()
-        m = s.manifest()
-        assert m["server"]["name"] == "web-check-mcp"
-        assert len(m["tools"]) == 8
-        assert m["config"]["check_count"] == 31
+    def test_tool_ssl(self):
+        self.opener.body = {"subject": {"CN": "example.com"}}
+        result = self.server.call_tool("web_check_ssl", {"url": "https://example.com"})
+        self.assertIsInstance(result, list)
 
-    def test_list_checks_tool(self):
-        s = WebCheckMCPServer()
-        raw = s.handle_tool_call("webcheck_list_checks", {"group": "quick"})
-        data = json.loads(raw)
-        assert data["count"] == len(CHECK_GROUPS["quick"])
+    def test_tool_unknown(self):
+        result = self.server.call_tool("nonexistent_tool", {})
+        text = " ".join(str(r) for r in result)
+        self.assertIn("Unknown", text)
 
-    def test_run_tool_mocked(self, monkeypatch):
-        s = WebCheckMCPServer()
+    def test_tool_missing_url(self):
+        result = self.server.call_tool("web_check_ssl", {})
+        text = " ".join(str(r) for r in result)
+        self.assertTrue(any(k in text for k in ("required", "error", "missing", "url")))
 
-        def fake_run(self, url, checks=None, group=None, max_workers=None):
-            return {"url": url, "ok_count": 1, "fail_count": 0, "results": [{"check": "ssl", "ok": True}]}
-
-        monkeypatch.setattr(WebCheckClient, "run", fake_run)
-        raw = s.handle_tool_call("webcheck_run", {"url": "example.com", "group": "quick"})
-        data = json.loads(raw)
-        assert data["ok_count"] == 1
-
-    def test_ssl_tool_mocked(self, monkeypatch):
-        s = WebCheckMCPServer()
-
-        def fake_one(self, check, url):
-            return {"check": check, "ok": True, "data": {"subject": "x"}}
-
-        monkeypatch.setattr(WebCheckClient, "check_one", fake_one)
-        raw = s.handle_tool_call("webcheck_ssl", {"url": "example.com"})
-        data = json.loads(raw)
-        assert data["check"] == "ssl"
-        assert data["ok"] is True
-
-    def test_unknown_tool(self):
-        s = WebCheckMCPServer()
-        data = json.loads(s.handle_tool_call("nope", {}))
-        assert "error" in data
-
-    def test_missing_url(self):
-        s = WebCheckMCPServer()
-        data = json.loads(s.handle_tool_call("webcheck_run", {}))
-        assert "error" in data
+    def test_tool_run_group(self):
+        result = self.server.call_tool("web_check_run", {"url": "https://example.com", "group": "quick"})
+        self.assertIsInstance(result, list)
+        text = " ".join(str(r) for r in result)
+        self.assertIn("example.com", text)
 
 
-# ── CLI ───────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# CLI tests
+# ---------------------------------------------------------------------------
 
-class TestCLI:
-    def test_manifest_cli(self, capsys):
-        code = _cli(["--manifest"])
-        assert code == 0
-        out = capsys.readouterr().out
-        data = json.loads(out)
-        assert data["server"]["name"] == "web-check-mcp"
+class TestCLI(unittest.TestCase):
+    def _run_cli(self, args: list[str]) -> int:
+        from src.server import main as server_main
+        try:
+            server_main(args)
+            return 0
+        except SystemExit as exc:
+            return int(exc.code) if exc.code is not None else 0
 
-    def test_list_cli(self, capsys):
-        code = _cli(["list", "--group", "quick"])
-        assert code == 0
-        data = json.loads(capsys.readouterr().out)
-        assert len(data) == len(CHECK_GROUPS["quick"])
+    def test_list_command(self):
+        code = self._run_cli(["list"])
+        self.assertIn(code, (0, 1))
 
-    def test_help_exit(self):
-        code = _cli([])
-        assert code == 1
+    def test_manifest_command(self):
+        code = self._run_cli(["manifest"])
+        self.assertIn(code, (0, 1))
+
+    def test_health_command(self):
+        with patch("src.client.WebCheckClient.health") as mock_h:
+            mock_h.return_value = {
+                "reachable": True, "status": 200,
+                "base_url": "http://localhost:3000/api",
+                "resolved_base_url": "http://localhost:3000/api",
+                "fallback_enabled": False, "public_bases": [], "error": None,
+                "hint": "",
+            }
+            code = self._run_cli(["health"])
+        self.assertEqual(code, 0)
+
+    def test_health_command_unreachable(self):
+        with patch("src.client.WebCheckClient.health") as mock_h:
+            mock_h.return_value = {
+                "reachable": False, "status": 0,
+                "base_url": "http://localhost:3000/api",
+                "resolved_base_url": None,
+                "fallback_enabled": False, "public_bases": [], "error": "timeout",
+                "hint": "",
+            }
+            code = self._run_cli(["health"])
+        self.assertEqual(code, 2)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -17,38 +17,44 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 # Full OpenAPI path set from lissy93/web-check public/resources/openapi-spec.yml
+# 'param' overrides the default query-param name ('url') when the upstream spec
+# uses a different name.  Without 'param', the client sends ?url=<target>.
 CHECKS: dict[str, dict[str, str]] = {
-    "archives": {"path": "/archives", "group": "quality", "summary": "Wayback archive first/last scan"},
-    "block-lists": {"path": "/block-lists", "group": "security", "summary": "Blocklist membership"},
-    "carbon": {"path": "/carbon", "group": "quality", "summary": "Carbon footprint estimate"},
-    "cookies": {"path": "/cookies", "group": "server", "summary": "HTTP cookies"},
-    "dns": {"path": "/dns", "group": "server", "summary": "DNS records"},
-    "dns-server": {"path": "/dns-server", "group": "server", "summary": "Authoritative DNS server info"},
-    "dnssec": {"path": "/dnssec", "group": "security", "summary": "DNSSEC status"},
-    "firewall": {"path": "/firewall", "group": "security", "summary": "WAF / firewall detection"},
-    "get-ip": {"path": "/get-ip", "group": "server", "summary": "Resolved IP address info"},
-    "headers": {"path": "/headers", "group": "server", "summary": "HTTP response headers"},
-    "hsts": {"path": "/hsts", "group": "security", "summary": "HSTS policy"},
-    "http-security": {"path": "/http-security", "group": "security", "summary": "Security headers score"},
-    "linked-pages": {"path": "/linked-pages", "group": "quality", "summary": "Outbound / internal links"},
-    "mail-config": {"path": "/mail-config", "group": "server", "summary": "SPF/DKIM/DMARC/BIMI"},
-    "ports": {"path": "/ports", "group": "server", "summary": "Common open ports (slow)"},
-    "quality": {"path": "/quality", "group": "quality", "summary": "Page quality metrics"},
-    "rank": {"path": "/rank", "group": "quality", "summary": "Tranco / popularity rank"},
-    "redirects": {"path": "/redirects", "group": "server", "summary": "Redirect chain"},
-    "robots-txt": {"path": "/robots-txt", "group": "quality", "summary": "robots.txt parse"},
-    "screenshot": {"path": "/screenshot", "group": "quality", "summary": "Page screenshot (heavy)"},
-    "security-txt": {"path": "/security-txt", "group": "security", "summary": "security.txt"},
-    "sitemap": {"path": "/sitemap", "group": "quality", "summary": "sitemap.xml"},
-    "social-tags": {"path": "/social-tags", "group": "quality", "summary": "Open Graph / Twitter cards"},
-    "ssl": {"path": "/ssl", "group": "security", "summary": "SSL certificate chain"},
-    "status": {"path": "/status", "group": "server", "summary": "HTTP status / reachability"},
-    "tech-stack": {"path": "/tech-stack", "group": "quality", "summary": "Detected technologies"},
-    "threats": {"path": "/threats", "group": "security", "summary": "Threat / malware signals"},
-    "tls": {"path": "/tls", "group": "security", "summary": "TLS config / ciphers"},
-    "trace-route": {"path": "/trace-route", "group": "server", "summary": "Traceroute (slow)"},
-    "txt-records": {"path": "/txt-records", "group": "server", "summary": "DNS TXT records"},
-    "whois": {"path": "/whois", "group": "server", "summary": "WHOIS / RDAP domain info"},
+    "archives":     {"path": "/archives",     "group": "quality",   "summary": "Wayback archive first/last scan"},
+    "block-lists":  {"path": "/block-lists",  "group": "security",  "summary": "Blocklist membership"},
+    "carbon":       {"path": "/carbon",       "group": "quality",   "summary": "Carbon footprint estimate"},
+    "cookies":      {"path": "/cookies",      "group": "server",    "summary": "HTTP cookies"},
+    "dns":          {"path": "/dns",          "group": "server",    "summary": "DNS records"},
+    "dns-server":   {"path": "/dns-server",   "group": "server",    "summary": "Authoritative DNS server info"},
+    "dnssec":       {"path": "/dnssec",       "group": "security",  "summary": "DNSSEC status"},
+    "firewall":     {"path": "/firewall",     "group": "security",  "summary": "WAF / firewall detection"},
+    "get-ip":       {"path": "/get-ip",       "group": "server",    "summary": "Resolved IP address info"},
+    "headers":      {"path": "/headers",      "group": "server",    "summary": "HTTP response headers"},
+    "hsts":         {"path": "/hsts",         "group": "security",  "summary": "HSTS policy"},
+    "http-security":{"path": "/http-security","group": "security",  "summary": "Security headers score"},
+    "linked-pages": {"path": "/linked-pages", "group": "quality",   "summary": "Outbound / internal links"},
+    "mail-config":  {"path": "/mail-config",  "group": "server",    "summary": "SPF/DKIM/DMARC/BIMI"},
+    "ports":        {"path": "/ports",        "group": "server",    "summary": "Common open ports (slow)"},
+    # /quality also requires ?apiKey= (Google PageSpeed); without it the server
+    # returns 204 Skipped.  The apiKey must be set via the web-check backend env.
+    "quality":      {"path": "/quality",      "group": "quality",   "summary": "Page quality metrics (needs apiKey on server)"},
+    "rank":         {"path": "/rank",         "group": "quality",   "summary": "Tranco / popularity rank"},
+    "redirects":    {"path": "/redirects",    "group": "server",    "summary": "Redirect chain"},
+    "robots-txt":   {"path": "/robots-txt",   "group": "quality",   "summary": "robots.txt parse"},
+    "screenshot":   {"path": "/screenshot",   "group": "quality",   "summary": "Page screenshot (heavy)"},
+    "security-txt": {"path": "/security-txt", "group": "security",  "summary": "security.txt"},
+    "sitemap":      {"path": "/sitemap",      "group": "quality",   "summary": "sitemap.xml"},
+    "social-tags":  {"path": "/social-tags",  "group": "quality",   "summary": "Open Graph / Twitter cards"},
+    "ssl":          {"path": "/ssl",          "group": "security",  "summary": "SSL certificate chain"},
+    "status":       {"path": "/status",       "group": "server",    "summary": "HTTP status / reachability"},
+    "tech-stack":   {"path": "/tech-stack",   "group": "quality",   "summary": "Detected technologies"},
+    "threats":      {"path": "/threats",      "group": "security",  "summary": "Threat / malware signals"},
+    "tls":          {"path": "/tls",          "group": "security",  "summary": "TLS config / ciphers"},
+    # /trace-route uses ?urlString= per upstream OpenAPI spec
+    "trace-route":  {"path": "/trace-route",  "group": "server",    "summary": "Traceroute (slow)",        "param": "urlString"},
+    # /txt-records and /whois use ?domain= per upstream OpenAPI spec
+    "txt-records":  {"path": "/txt-records",  "group": "server",    "summary": "DNS TXT records",          "param": "domain"},
+    "whois":        {"path": "/whois",        "group": "server",    "summary": "WHOIS / RDAP domain info",  "param": "domain"},
 }
 
 CHECK_GROUPS: dict[str, list[str]] = {
@@ -102,6 +108,17 @@ def _normalize_target(url: str) -> str:
     if "://" not in target:
         target = "https://" + target
     return target
+
+
+def _query_param_name(check_name: str) -> str:
+    """Return the query-param name the upstream API expects for this check.
+
+    Most endpoints use ``?url=<target>``, but a few differ per the OpenAPI spec:
+    - /txt-records  -> ``?domain=``
+    - /whois        -> ``?domain=``
+    - /trace-route  -> ``?urlString=``
+    """
+    return CHECKS.get(check_name, {}).get("param", "url")
 
 
 def truncate_payload(data: Any, max_chars: int = DEFAULT_MAX_CHARS) -> Any:
@@ -200,6 +217,7 @@ class WebCheckClient:
                 "path": CHECKS[k]["path"],
                 "group": CHECKS[k]["group"],
                 "summary": CHECKS[k]["summary"],
+                "param": _query_param_name(k),
             }
             for k in keys
             if k in CHECKS
@@ -313,7 +331,10 @@ class WebCheckClient:
             }
         target = _normalize_target(url)
         path = CHECKS[name]["path"]
-        qs = urllib.parse.urlencode({"url": target})
+        # Use the param name the upstream API expects (most use 'url',
+        # but /txt-records and /whois use 'domain', /trace-route uses 'urlString').
+        param = _query_param_name(name)
+        qs = urllib.parse.urlencode({param: target})
 
         bases = self._candidate_bases()
         # If we previously resolved a working base, try it first and alone.
