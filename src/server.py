@@ -155,10 +155,13 @@ class WebCheckMCPServer:
         # Kept for test-injection compatibility (used by TestMCPServer).
         opener: Any = None,
         fallback: bool | None = None,
+        base_url: str | None = None,  # backward-compat alias
     ):
         self.name = name
         self.version = version
-        self.default_base_url = default_base_url or os.environ.get(
+        # Accept both default_base_url and legacy base_url kwarg
+        resolved = default_base_url or base_url
+        self.default_base_url = resolved or os.environ.get(
             "WEB_CHECK_BASE_URL", DEFAULT_BASE_URL
         )
         self._opener = opener
