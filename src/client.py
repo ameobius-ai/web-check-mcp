@@ -209,6 +209,73 @@ def truncate_payload(data: Any, max_chars: int = DEFAULT_MAX_CHARS) -> Any:
 import hashlib
 from typing import Optional
 
+
+class CircuitBreaker:
+    """Circuit breaker pattern for failing APIs.
+    
+    States:
+    - CLOSED: Normal operation, requests pass through
+    - OPEN: Circuit tripped, fail fast without making requests
+    - HALF_OPEN: Testing if service recovered, allow one probe request
+    
+    Transitions:
+    - CLOSED -> OPEN: After failure_threshold consecutive failures
+    - OPEN -> HALF_OPEN: After recovery_timeout seconds
+    - HALF_OPEN -> CLOSED: On successful request
+    - HALF_OPEN -> OPEN: On failed request
+    """
+    
+    CLOSED = "closed"
+    OPEN = "open"
+    HALF_OPEN = "half_open"
+    
+    def __init__(self, failure_threshold: int = 5, recovery_timeout: int = 60):
+        self.failure_threshold = failure_threshold
+        self.recovery_timeout = recovery_timeout
+        self._state = self.CLOSED
+        self._failure_count = 0
+        self._last_failure_time = 0
+        self._last_success_time = 0
+    
+    @property
+    def state(self) -> str:
+        """Current circuit state, auto-transitions OPEN -> HALF_OPEN on timeout."""
+        if self._state == self.OPEN:
+            if time.time() - self._last_failure_time >= self.recovery_timeout:
+                self._state = self.HALF_OPEN
+        return self._state
+    
+    def can_execute(self) -> bool:
+        """Check if request should be allowed."""
+        state = self.state
+        if state == self.CLOSED:
+            return True
+        elif state == self.HALF_OPEN:
+            return True  # Allow one probe
+        else:  # OPEN
+            return False
+    
+    def record_success(self):
+        """Record successful request."""
+        self._failure_count = 0
+        self._state = self.CLOSED
+        self._last_success_time = time.time()
+    
+    def record_failure(self):
+        """Record failed request."""
+        self._failure_count += 1
+        self._last_failure_time = time.time()
+        
+        if self._failure_count >= self.failure_threshold:
+            self._state = self.OPEN
+    
+    def reset(self):
+        """Manually reset circuit breaker."""
+        self._state = self.CLOSED
+        self._failure_count = 0
+        self._last_failure_time = 0
+
+
 class ResultCache:
     """Simple TTL-based in-memory cache for check results."""
     
@@ -439,6 +506,26 @@ class WebCheckClient:
         qs = urllib.parse.urlencode({param: target})
 
         bases = self._candidate_bases()
+        # Filter bases by circuit breaker state
+        filtered_bases = []
+        for base in bases:
+            if base not in self._circuit_breakers:
+                self._circuit_breakers[base] = CircuitBreaker()
+            cb = self._circuit_breakers[base]
+            if cb.can_execute():
+                filtered_bases.append(base)
+        
+        if not filtered_bases:
+            # All circuits open, return error
+            return {
+                "check": name,
+                "ok": False,
+                "status": 0,
+                "error": "All API endpoints are unavailable (circuit breakers open)",
+                "data": None
+            }
+        bases = filtered_bases
+
         # If we previously resolved a working base, try it first and alone.
         if self._resolved_base and self._resolved_base in bases:
             bases = [self._resolved_base] + [b for b in bases if b != self._resolved_base]
@@ -464,6 +551,12 @@ class WebCheckClient:
             }
             used_base = base
             if ok or not (blocking or status == 0):
+                # Record circuit breaker state
+                cb = self._circuit_breakers[base]
+                if ok:
+                    cb.record_success()
+                elif status >= 500 or status == 0:
+                    cb.record_failure()
                 # Either succeeded or got a definitive non-blocking answer.
                 if ok:
                     self._resolved_base = base
