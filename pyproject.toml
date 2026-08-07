@@ -6,8 +6,27 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "AMEOBIUS" }]
-keywords = ["mcp", "web-check", "osint", "security", "agents"]
+keywords = ["mcp", "web-check", "osint", "security", "agents", "cli", "recon"]
 dependencies = []
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Internet :: WWW/HTTP",
+    "Topic :: Security",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: System :: Networking",
+    "Topic :: Utilities",
+    "Typing :: Typed",
+]
 
 [project.optional-dependencies]
 dev = [
@@ -19,9 +38,15 @@ dev = [
     "black>=23.0",
 ]
 
-
 [project.scripts]
 web-check-mcp = "src.server:main"
+
+[project.urls]
+Homepage = "https://github.com/ameobius-ai/web-check-mcp"
+Documentation = "https://github.com/ameobius-ai/web-check-mcp#readme"
+Repository = "https://github.com/ameobius-ai/web-check-mcp"
+Issues = "https://github.com/ameobius-ai/web-check-mcp/issues"
+Changelog = "https://github.com/ameobius-ai/web-check-mcp/blob/main/CHANGELOG.md"
 
 [build-system]
 requires = ["setuptools>=61"]
@@ -35,6 +60,7 @@ src = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-v --tb=short"
 
 [tool.ruff]
 target-version = "py310"
@@ -44,3 +70,30 @@ line-length = 120
 # BLE001 disabled: intentional catch-all Exception in API/MCP handlers
 # to surface structured errors to the agent instead of crashing.
 ignore = ["BLE001"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101"]  # Allow assert in tests
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+ignore_missing_imports = true
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+
+[tool.black]
+line-length = 120
+target-version = ['py310', 'py311', 'py312']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+    \.git
+  | \.venv
+  | build
+  | dist
+)/
+'''
