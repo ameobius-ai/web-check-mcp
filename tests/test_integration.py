@@ -1,7 +1,6 @@
 """Integration tests with real MCP clients."""
 import json
 import subprocess
-import time
 
 import pytest
 
