@@ -9,15 +9,14 @@ from __future__ import annotations
 import json
 import os
 import ssl
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any
-
-import time
 from functools import wraps
+from typing import Any
 
 def _with_retry(max_retries=None):
     """Retry transient failures (5xx, connection errors) with exponential backoff."""
@@ -71,7 +70,7 @@ CHECKS: dict[str, dict[str, str]] = {
     "ports":        {"path": "/ports",        "group": "server",    "summary": "Common open ports (slow)"},
     # /quality also requires ?apiKey= (Google PageSpeed); without it the server
     # returns 204 Skipped.  The apiKey must be set via the web-check backend env.
-    "quality":      {"path": "/quality",      "group": "quality",   "summary": "Page quality metrics (needs apiKey on server)"},
+    "quality": {"path": "/quality", "group": "quality", "summary": "Page quality metrics (needs apiKey on server)"},
     "rank":         {"path": "/rank",         "group": "quality",   "summary": "Tranco / popularity rank"},
     "redirects":    {"path": "/redirects",    "group": "server",    "summary": "Redirect chain"},
     "robots-txt":   {"path": "/robots-txt",   "group": "quality",   "summary": "robots.txt parse"},
@@ -85,10 +84,10 @@ CHECKS: dict[str, dict[str, str]] = {
     "threats":      {"path": "/threats",      "group": "security",  "summary": "Threat / malware signals"},
     "tls":          {"path": "/tls",          "group": "security",  "summary": "TLS config / ciphers"},
     # /trace-route uses ?urlString= per upstream OpenAPI spec
-    "trace-route":  {"path": "/trace-route",  "group": "server",    "summary": "Traceroute (slow)",        "param": "urlString"},
+    "trace-route": {"path": "/trace-route", "group": "server", "summary": "Traceroute (slow)", "param": "urlString"},
     # /txt-records and /whois use ?domain= per upstream OpenAPI spec
-    "txt-records":  {"path": "/txt-records",  "group": "server",    "summary": "DNS TXT records",          "param": "domain"},
-    "whois":        {"path": "/whois",        "group": "server",    "summary": "WHOIS / RDAP domain info",  "param": "domain"},
+    "txt-records": {"path": "/txt-records", "group": "server", "summary": "DNS TXT records", "param": "domain"},
+    "whois": {"path": "/whois", "group": "server", "summary": "WHOIS / RDAP domain info", "param": "domain"},
 }
 
 CHECK_GROUPS: dict[str, list[str]] = {
