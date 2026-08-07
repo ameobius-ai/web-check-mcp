@@ -5,14 +5,13 @@ import io
 import json
 import os
 import sys
-from typing import Any
+
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from src.client import WebCheckClient, CHECKS, CHECK_GROUPS
-from src.server import WebCheckMCPServer, _cli, main
-from src.stdio import run_stdio
+from src.client import CHECKS, WebCheckClient
+from src.server import WebCheckMCPServer, _cli
 
 
 class FakeOpener:
@@ -69,7 +68,7 @@ class TestClientEdgeCases:
         """Test _http_get with opener returning bytes."""
         opener = FakeOpener({"/test": (200, b'{"data": "bytes"}')})
         client = WebCheckClient(opener=opener)
-        status, data, err = client._http_get("http://test/api/test")
+        status, data, _err = client._http_get("http://test/api/test")
         assert status == 200
         assert data["data"] == "bytes"
     
@@ -77,7 +76,7 @@ class TestClientEdgeCases:
         """Test _http_get with invalid JSON."""
         opener = FakeOpener({"/test": (200, "not json")})
         client = WebCheckClient(opener=opener, max_chars=100)
-        status, data, err = client._http_get("http://test/api/test")
+        status, data, _err = client._http_get("http://test/api/test")
         assert status == 200
         assert "raw" in data
     
@@ -91,7 +90,7 @@ class TestClientEdgeCases:
             )
         
         client = WebCheckClient(opener=mock_opener)
-        status, data, err = client._http_get("http://test/api/missing")
+        status, data, _err = client._http_get("http://test/api/missing")
         assert status == 404
         assert "error" in data
     
@@ -101,7 +100,7 @@ class TestClientEdgeCases:
             raise ConnectionError("Network error")
         
         client = WebCheckClient(opener=mock_opener)
-        status, data, err = client._http_get("http://test/api/fail")
+        status, data, _err = client._http_get("http://test/api/fail")
         assert status == 0
         assert "error" in data
     
@@ -320,7 +319,7 @@ class TestQueryParameterNames:
         """Test that all checks return a valid param name."""
         from src.client import _query_param_name
         
-        for check_name in CHECKS.keys():
+        for check_name in CHECKS:
             param = _query_param_name(check_name)
             assert param in ["url", "domain", "urlString"]
     
@@ -397,7 +396,7 @@ class TestFallbackLogic:
         )
         
         # First call should try fallback
-        result1 = client.check_one("get-ip", "example.com")
+        client.check_one("get-ip", "example.com")
         assert client._resolved_base is not None
         
         # Second call should use resolved base
