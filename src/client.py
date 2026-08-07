@@ -16,6 +16,40 @@ from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
+import time
+from functools import wraps
+
+def _with_retry(max_retries=None):
+    """Retry transient failures (5xx, connection errors) with exponential backoff."""
+    if max_retries is None:
+        max_retries = int(os.environ.get("WEB_CHECK_MAX_RETRIES", "3"))
+    
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            last_error = None
+            for attempt in range(max_retries + 1):
+                try:
+                    status, data, err = func(*args, **kwargs)
+                    # Retry on 5xx errors and connection errors (status 0)
+                    if status >= 500 or status == 0:
+                        if attempt < max_retries:
+                            delay = 1.0 * (2 ** attempt)  # 1s, 2s, 4s
+                            time.sleep(delay)
+                            continue
+                    return status, data, err
+                except Exception as e:
+                    last_error = e
+                    if attempt < max_retries:
+                        delay = 1.0 * (2 ** attempt)
+                        time.sleep(delay)
+                        continue
+                    raise
+            return 0, {"error": str(last_error)}, str(last_error)
+        return wrapper
+    return decorator
+
+
 # Full OpenAPI path set from lissy93/web-check public/resources/openapi-spec.yml
 # 'param' overrides the default query-param name ('url') when the upstream spec
 # uses a different name.  Without 'param', the client sends ?url=<target>.
@@ -252,6 +286,7 @@ class WebCheckClient:
         ctx.verify_mode = ssl.CERT_NONE
         return ctx
 
+    @_with_retry()
     def _http_get(self, url: str) -> tuple[int, Any, str | None]:
         req = urllib.request.Request(
             url,
