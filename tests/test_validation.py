@@ -1,13 +1,11 @@
 """Validation tests for Wave 4."""
+import json
 import os
 import sys
-import json
-
-import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from src.server import WebCheckMCPServer, _validate_url, _validate_check_name
+from src.server import WebCheckMCPServer, _validate_check_name, _validate_url
 
 
 class TestServerValidation:
