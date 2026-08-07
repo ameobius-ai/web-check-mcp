@@ -113,7 +113,7 @@ class TestRetryLogic:
         with patch.dict(os.environ, {"WEB_CHECK_MAX_RETRIES": "1"}):
             client = WebCheckClient(opener=opener)
             with patch.object(time, 'sleep'):
-                result = client.check_one("ssl", "example.com")
+                client.check_one("ssl", "example.com")
         
         assert opener.call_count == 2  # 1 initial + 1 retry
     
@@ -125,7 +125,7 @@ class TestRetryLogic:
         
         with patch.dict(os.environ, {"WEB_CHECK_MAX_RETRIES": "0"}):
             client = WebCheckClient(opener=opener)
-            result = client.check_one("ssl", "example.com")
+            client.check_one("ssl", "example.com")
         
         assert opener.call_count == 1  # No retries
 
@@ -148,7 +148,7 @@ class TestResultCache:
         test_data = {"check": "ssl", "ok": True}
         
         cache.set("https://example.com", "ssl", test_data)
-        result = cache.get("https://example.com", "ssl")
+        cache.get("https://example.com", "ssl")
         
         assert result == test_data
         assert cache.hits == 1
