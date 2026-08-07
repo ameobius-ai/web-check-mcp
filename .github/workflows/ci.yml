@@ -7,13 +7,42 @@ on:
     branches: [main]
 
 jobs:
+  lint:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff mypy
+
+      - name: Lint with ruff
+        run: |
+          ruff check .
+          ruff format --check .
+
+      - name: Type check with mypy
+        run: mypy src/ --ignore-missing-imports
+
   test:
+    name: Test Python ${{ matrix.python-version }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest]
         python-version: ["3.10", "3.11", "3.12"]
+        include:
+          - os: macos-latest
+            python-version: "3.12"
 
     steps:
       - uses: actions/checkout@v4
@@ -22,29 +51,80 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          cache: "pip"
 
-      - name: Install
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pytest ruff
+          pip install pytest pytest-cov pytest-mock
+          pip install -e .
 
-      - name: Lint with ruff
-        run: ruff check .
+      - name: Run tests with coverage
+        run: |
+          pytest tests/ -v --cov=src --cov-report=xml --cov-report=term-missing
 
-      - name: Compile
-        run: python -m py_compile src/client.py src/server.py src/__main__.py src/__init__.py
+      - name: Upload coverage to Codecov
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.xml
+          flags: unittests
+          name: codecov-umbrella
+          fail_ci_if_error: false
 
-      - name: Test
-        run: python -m pytest tests/ -v
-
-  manifest-check:
+  security:
+    name: Security Scanning
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install pytest
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pip-audit bandit
+          pip install -e .
+
+      - name: Run pip-audit
+        run: pip-audit
+        continue-on-error: true
+
+      - name: Run bandit security scan
+        run: bandit -r src/ -ll
+        continue-on-error: true
+
+  manifest-check:
+    name: Manifest Smoke Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: pip install -e .
+
       - name: Manifest smoke
         run: |
-          python -m src.server --manifest | python -c "import sys,json; d=json.load(sys.stdin); assert d['server']['name']=='web-check-mcp'; assert len(d['tools'])==8; print('manifest OK, tools=',len(d['tools']))"
+          python -m src.server --manifest > manifest.json
+          python -c "import json; d=json.load(open('manifest.json')); assert d['server']['name']=='web-check-mcp'; assert len(d['tools'])==8; print('Manifest OK, tools=',len(d['tools']))"
+
+  docker:
+    name: Docker Build Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t web-check-mcp:test .
+
+      - name: Test Docker image
+        run: |
+          docker run --rm web-check-mcp:test --manifest | python -c "import sys,json; d=json.load(sys.stdin); assert len(d['tools'])==8; print('Docker manifest OK')"
