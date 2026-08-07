@@ -17,6 +17,69 @@ from typing import Any
 
 from . import __version__
 from .client import (
+
+import re
+from urllib.parse import urlparse
+
+def _validate_url(url: str) -> str:
+    """Validate and normalize URL. Raises ValueError on invalid input."""
+    if not url or not isinstance(url, str):
+        raise ValueError("URL must be a non-empty string")
+    
+    url = url.strip()
+    if not url:
+        raise ValueError("URL cannot be empty")
+    
+    # Add https:// if missing
+    if not url.startswith(('http://', 'https://')):
+        url = 'https://' + url
+    
+    # Basic URL validation
+    try:
+        parsed = urlparse(url)
+        if not parsed.netloc:
+            raise ValueError(f"Invalid URL format: {url}")
+        # Check for valid domain/IP
+        if not re.match(r'^[a-zA-Z0-9.-]+$', parsed.netloc.split(':')[0]):
+            raise ValueError(f"Invalid domain format: {parsed.netloc}")
+    except Exception as e:
+        raise ValueError(f"Invalid URL: {url} - {str(e)}")
+    
+    return url
+
+def _validate_check_name(name: str) -> str:
+    """Validate check name against CHECKS dict."""
+    if not name or not isinstance(name, str):
+        raise ValueError("Check name must be a non-empty string")
+    
+    name = name.strip().lstrip('/')
+    if name not in CHECKS:
+        raise ValueError(f"Unknown check '{name}'. Use list_checks() to see available checks.")
+    
+    return name
+
+def _validate_group_name(group: str) -> str:
+    """Validate group name against CHECK_GROUPS dict."""
+    if not group or not isinstance(group, str):
+        raise ValueError("Group name must be a non-empty string")
+    
+    group = group.strip()
+    if group not in CHECK_GROUPS:
+        raise ValueError(f"Unknown group '{group}'. Known: {', '.join(sorted(CHECK_GROUPS.keys()))}")
+    
+    return group
+
+def _validate_positive_int(value: any, name: str, min_val: int = 1, max_val: int = 1000) -> int:
+    """Validate positive integer within range."""
+    try:
+        val = int(value)
+        if val < min_val or val > max_val:
+            raise ValueError(f"{name} must be between {min_val} and {max_val}, got {val}")
+        return val
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be a valid integer")
+
+
     CHECK_GROUPS,
     CHECKS,
     DEFAULT_BASE_URL,
@@ -205,6 +268,21 @@ class WebCheckMCPServer:
 
     def call_tool(self, name: str, args: dict[str, Any]) -> list[dict[str, Any]]:
         args = args or {}
+
+        # Input validation
+        try:
+            if name == "webcheck_list_checks" and args.get("group"):
+                _validate_group_name(args["group"])
+            elif name in ["webcheck_ssl", "webcheck_dns", "webcheck_headers", "webcheck_whois", "webcheck_security", "webcheck_run"]:
+                if "url" in args:
+                    _validate_url(args["url"])
+                if "timeout" in args:
+                    _validate_positive_int(args["timeout"], "timeout", 1, 300)
+                if "max_workers" in args:
+                    _validate_positive_int(args["max_workers"], "max_workers", 1, 100)
+        except ValueError as e:
+            return [{"type": "text", "text": json.dumps({"error": str(e), "tool": name})}]
+
         try:
             if name == "webcheck_list_checks":
                 client = WebCheckClient(
