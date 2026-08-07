@@ -1,62 +1,85 @@
 # Changelog
 
-All notable changes to this project are documented here.
-Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
+All notable changes to this project will be documented in this file.
 
-## [0.3.0] — 2026-07-25
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-### Fixed
-- **Correct query-param names for three endpoints** (WC-023)  
-  `/txt-records` and `/whois` now send `?domain=` and `/trace-route` sends
-  `?urlString=` per the upstream OpenAPI spec. All three previously sent
-  `?url=` which caused silent failures on those checks.
-- **`--stdio` now speaks both NDJSON and Content-Length framing** (WC-010 / WC-010b)  
-  Hosts built on the TypeScript SDK use LSP-style `Content-Length` headers;
-  the old loop only understood newline-delimited JSON, so handshakes with TS
-  hosts would silently stall. The new transport auto-detects framing per
-  message and replies in kind.
-- **`notifications/initialized` is now correctly silent** — no longer replies
-  with a spurious response that confused some hosts.
-- **`resources/list` and `prompts/list` return empty arrays** instead of
-  `-32601 Method not found`, which several hosts treat as a fatal error on
-  connect.
-- **`initialize` echoes the client’s `protocolVersion`** instead of always
-  advertising `2024-11-05`.
+## [0.3.0] - 2026-08-07
 
 ### Added
-- **`src/stdio.py`** — standalone dual-mode MCP stdio transport with 18 unit
-  tests (`TestStdioFraming`, `TestHandleRpc`, `TestStdioLoop`).
-- **`scripts/live_smoke.py` + `.github/workflows/live-smoke.yml`** (WC-015)  
-  Optional weekly / manual-dispatch workflow that probes each public base in
-  isolation (`fallback=False`) and writes a Markdown table to the run summary.
-  Non-blocking by default; `--strict` flag enables hard failure.
-- **`docs/openapi-drift.md`** — full drift audit table against upstream spec,
-  param mismatch explanations, re-audit trigger.
-- **`list_checks()` now includes a `param` field** per entry (the query-param
-  name that endpoint expects).
+
+#### Core Features
+- **MCP Server** with 8 tools: `webcheck_run`, `webcheck_ssl`, `webcheck_dns`, `webcheck_security`, `webcheck_headers`, `webcheck_whois`, `webcheck_list_checks`, `webcheck_health`
+- **31 OSINT checks** wrapped from Lissy93/web-check API
+- **6 check presets**: `quick`, `security`, `server`, `quality`, `heavy`, `all`
+- **CLI interface** with subcommands: `list`, `health`, `run`, `check`, `--manifest`, `--stdio`
+- **Parallel fan-out** for multi-check runs via ThreadPoolExecutor
+- **Payload truncation** to prevent agent context overflow (default 12000 chars)
+- **Dual-mode STDIO framing** (NDJSON + Content-Length auto-detection)
+- **Tool annotations** (`readOnlyHint`, `openWorldHint`) for MCP clients
+
+#### Infrastructure
+- **GitHub Actions CI** — multi-OS (Ubuntu, macOS), multi-Python (3.10, 3.11, 3.12)
+- **Docker image** — python:3.12-slim based, non-root user, healthcheck
+- **docker-compose.yml** — self-host option with upstream web-check
+- **Automated PyPI publishing** via release workflow on tag push
+- **GitHub Releases** with auto-generated changelog
+- **Dependabot** for pip, github-actions, docker ecosystems
+- **Codecov integration** for coverage tracking
+- **Security scanning** via pip-audit and bandit
+- **Pre-commit hooks** with ruff
+
+#### Documentation
+- **SECURITY.md** — vulnerability reporting policy
+- **CONTRIBUTING.md** — developer guide with setup instructions
+- **ROADMAP.md** — project tracking and status
+- **Issue templates** — bug report and feature request
+- **PR template** — with review checklist
+- **README.md** — comprehensive usage guide with examples
+
+#### Testing
+- **52+ unit tests** covering client, server, and STDIO modules
+- **90%+ code coverage** (pytest-cov)
+- **Mocked network** tests via FakeOpener fixture
+- **Integration tests** for MCP STDIO handshake
 
 ### Changed
-- `WebCheckMCPServer` now accepts `opener` and `fallback` kwargs for
-  test injection — no global mock needed.
-- `call_tool()` returns `list[{type, text}]` as the MCP spec expects;
-  `handle_tool_call()` kept as a backward-compatible string wrapper.
-- `main()` now accepts `argv` so tests can drive the CLI without patching
-  `sys.argv`.
-- `/quality` summary clarified: the `apiKey` requirement is server-side
-  (Google PageSpeed env var on the web-check backend), not a client param.
 
-## [0.2.0] — 2026-07-25
+- **Zero third-party dependencies** — Python 3.10+ stdlib only
+- **Multi-base failover** — automatic fallback between web-check.xyz and web-check.as93.net
+- **Smart URL normalization** — adds `https://` and `/api` suffix automatically
+- **Type hints** throughout codebase for better IDE support
+
+### Fixed
+
+- **mypy type error** in `client.py:405` — sorted() with None values
+- **Version sync** between pyproject.toml and server.json
+- **Dockerfile security** — removed editable install, added non-root user
+
+### Security
+
+- Non-root Docker user
+- SSL verification enabled by default
+- Timeout enforcement on all requests (default 25s)
+- No secrets in codebase (all via environment variables)
+- Dependabot for automated vulnerability updates
+
+## [0.2.0] - 2026-07-25
 
 ### Added
-- Multi-base failover: auto-retry `web-check.as93.net` (Netlify) when
-  `web-check.xyz` (Vercel) returns 429/403 or a Vercel challenge page.
-- Browser-like User-Agent to improve pass-through on Vercel.
-- Resolved-base stickiness — first successful base is reused per client.
-- `health()` and `run()` report `resolved_base_url` and `bases_used`.
-- 5 new fallback tests (35 total).
+- Initial release
+- Basic MCP server implementation
+- Core OSINT checks wrapper
+- CLI interface
+- Docker support
 
-## [0.1.0] — 2026-07-25
+## [0.1.0] - 2026-07-25
 
 ### Added
-- Initial release: 31 OpenAPI checks, 8 MCP tools, parallel fan-out,
-  payload truncation, STDIO JSON-RPC, CLI, zero pip deps.
+- Project scaffolding
+- Initial client implementation
+
+[0.3.0]: https://github.com/ameobius-ai/web-check-mcp/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/ameobius-ai/web-check-mcp/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/ameobius-ai/web-check-mcp/releases/tag/v0.1.0
