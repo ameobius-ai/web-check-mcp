@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+
+## [0.4.0] - 2026-08-08
+
+### Wave 4: Production Readiness
+
+#### Reliability
+- **Retry logic** with exponential backoff (WEB_CHECK_MAX_RETRIES)
+- **Circuit breaker** pattern for failing APIs
+- **Input validation** for all parameters
+
+#### Performance
+- **In-memory caching** with TTL (WEB_CHECK_CACHE_TTL)
+- **Rate limiting** with token bucket (WEB_CHECK_RATE_LIMIT)
+
+#### New Environment Variables
+- `WEB_CHECK_MAX_RETRIES` (default: 3)
+- `WEB_CHECK_CACHE_TTL` (default: 300, 0=disabled)
+- `WEB_CHECK_RATE_LIMIT` (default: 1.0 req/s)
+
+#### Enhanced Health Endpoint
+- `cache_stats`: hits, misses, hit_rate, size, ttl_seconds
+- `rate_limiter_stats`: tokens_per_second, bucket_size, current_tokens, total_waits
+
+#### Testing
+- Added 100+ comprehensive tests for Wave 4 features
+- Test coverage maintained at 90%+
+
+
 ## [0.3.0] - 2026-08-07
 
 ### Added
