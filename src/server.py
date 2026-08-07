@@ -13,13 +13,19 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 from typing import Any
+from urllib.parse import urlparse
 
 from . import __version__
 from .client import (
-
-import re
-from urllib.parse import urlparse
+    CHECK_GROUPS,
+    CHECKS,
+    DEFAULT_BASE_URL,
+    DEFAULT_MAX_CHARS,
+    DEFAULT_TIMEOUT,
+    WebCheckClient,
+)
 
 def _validate_url(url: str) -> str:
     """Validate and normalize URL. Raises ValueError on invalid input."""
@@ -80,14 +86,7 @@ def _validate_positive_int(value: any, name: str, min_val: int = 1, max_val: int
         raise ValueError(f"{name} must be a valid integer")
 
 
-    CHECK_GROUPS,
     CHECKS,
-    DEFAULT_BASE_URL,
-    DEFAULT_MAX_CHARS,
-    DEFAULT_TIMEOUT,
-    WebCheckClient,
-)
-
 _READ_OPEN = {
     "readOnlyHint": True,
     "openWorldHint": True,
