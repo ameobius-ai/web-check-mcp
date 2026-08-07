@@ -33,9 +33,9 @@ def _with_retry(max_retries=None):
                     # Retry on 5xx errors and connection errors (status 0)
                     if (status >= 500 or status == 0) and attempt < max_retries:
                         delay = 1.0 * (2 ** attempt)  # 1s, 2s, 4s
-                        delay = 1.0 * (2 ** attempt)  # 1s, 2s, 4s
+
                         time.sleep(delay)
-                            continue
+                        continue
                     return status, data, err
                 except Exception as e:
                     last_error = e
