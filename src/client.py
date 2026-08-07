@@ -31,10 +31,10 @@ def _with_retry(max_retries=None):
                 try:
                     status, data, err = func(*args, **kwargs)
                     # Retry on 5xx errors and connection errors (status 0)
-                    if status >= 500 or status == 0:
-                        if attempt < max_retries:
-                            delay = 1.0 * (2 ** attempt)  # 1s, 2s, 4s
-                            time.sleep(delay)
+                    if (status >= 500 or status == 0) and attempt < max_retries:
+                        delay = 1.0 * (2 ** attempt)  # 1s, 2s, 4s
+                        delay = 1.0 * (2 ** attempt)  # 1s, 2s, 4s
+                        time.sleep(delay)
                             continue
                     return status, data, err
                 except Exception as e:
@@ -239,19 +239,19 @@ class CircuitBreaker:
     @property
     def state(self) -> str:
         """Current circuit state, auto-transitions OPEN -> HALF_OPEN on timeout."""
-        if self._state == self.OPEN:
-            if time.time() - self._last_failure_time >= self.recovery_timeout:
-                self._state = self.HALF_OPEN
+        if self._state == self.OPEN and time.time() - self._last_failure_time >= self.recovery_timeout:
+            self._state = self.HALF_OPEN
+        return self._state
         return self._state
     
     def can_execute(self) -> bool:
         """Check if request should be allowed."""
         state = self.state
-        if state == self.CLOSED:
-            return True
-        elif state == self.HALF_OPEN:
-            return True  # Allow one probe
-        else:  # OPEN
+        return state in (self.CLOSED, self.HALF_OPEN)
+
+
+
+
             return False
     
     def record_success(self):
@@ -344,7 +344,7 @@ class ResultCache:
         """Create cache key from URL and check name."""
         return hashlib.sha256(f"{url}:{check}".encode()).hexdigest()
     
-    def get(self, url: str, check: str) -> Optional[any]:
+    def get(self, url: str, check: str) -> any | None:
         """Get cached result if valid, else None."""
         if self.ttl <= 0:
             return None
