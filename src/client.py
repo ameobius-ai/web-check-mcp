@@ -205,6 +205,67 @@ def truncate_payload(data: Any, max_chars: int = DEFAULT_MAX_CHARS) -> Any:
     return {"_truncated": True, "preview": raw[: max_chars - 40] + "…"}
 
 
+
+import hashlib
+from typing import Optional
+
+class ResultCache:
+    """Simple TTL-based in-memory cache for check results."""
+    
+    def __init__(self, ttl_seconds: int = 300):
+        self.ttl = ttl_seconds
+        self._cache: dict[str, tuple[float, any]] = {}
+        self.hits = 0
+        self.misses = 0
+    
+    def _make_key(self, url: str, check: str) -> str:
+        """Create cache key from URL and check name."""
+        return hashlib.sha256(f"{url}:{check}".encode()).hexdigest()
+    
+    def get(self, url: str, check: str) -> Optional[any]:
+        """Get cached result if valid, else None."""
+        if self.ttl <= 0:
+            return None
+        
+        key = self._make_key(url, check)
+        if key in self._cache:
+            timestamp, data = self._cache[key]
+            if time.time() - timestamp < self.ttl:
+                self.hits += 1
+                return data
+            else:
+                # Expired
+                del self._cache[key]
+        
+        self.misses += 1
+        return None
+    
+    def set(self, url: str, check: str, data: any):
+        """Cache result with current timestamp."""
+        if self.ttl <= 0:
+            return
+        
+        key = self._make_key(url, check)
+        self._cache[key] = (time.time(), data)
+    
+    def stats(self) -> dict:
+        """Return cache statistics."""
+        total = self.hits + self.misses
+        return {
+            "hits": self.hits,
+            "misses": self.misses,
+            "hit_rate": round(self.hits / total * 100, 1) if total > 0 else 0,
+            "size": len(self._cache),
+            "ttl_seconds": self.ttl
+        }
+    
+    def clear(self):
+        """Clear all cached entries."""
+        self._cache.clear()
+        self.hits = 0
+        self.misses = 0
+
+
 class WebCheckClient:
     """Thin client over Web Check REST endpoints.
 
@@ -365,6 +426,12 @@ class WebCheckClient:
                 "data": None,
             }
         target = _normalize_target(url)
+        # Check cache first
+        cached = self._cache.get(target, name)
+        if cached is not None:
+            cached["cached"] = True
+            return cached
+
         path = CHECKS[name]["path"]
         # Use the param name the upstream API expects (most use 'url',
         # but /txt-records and /whois use 'domain', /trace-route uses 'urlString').
@@ -403,6 +470,9 @@ class WebCheckClient:
                 break
         if used_base and last.get("ok"):
             self._resolved_base = used_base
+        # Cache successful results
+        if last.get("ok"):
+            self._cache.set(target, name, last)
         return last
 
     def run(
@@ -464,6 +534,7 @@ class WebCheckClient:
             "error": probe.get("error"),
             "fallback_enabled": self.fallback,
             "public_bases": PUBLIC_BASE_URLS,
+            "cache_stats": self._cache.stats(),
             "hint": (
                 "Public web-check.xyz (Vercel) may 429 datacenter IPs; "
                 "Netlify mirror web-check.as93.net is more open. "
