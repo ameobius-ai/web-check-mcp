@@ -251,8 +251,6 @@ class CircuitBreaker:
 
 
 
-
-            return False
     
     def record_success(self):
         """Record successful request."""
@@ -313,7 +311,6 @@ class RateLimiter:
             
             # Not enough tokens, wait
             if timeout > 0 and (time.time() - start_time) >= timeout:
-                return False
             
             # Wait for next token
             wait_time = (1 - self.tokens) / self.tokens_per_second
