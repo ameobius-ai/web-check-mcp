@@ -15,7 +15,7 @@ from src.client import (
     RateLimiter,
     ResultCache,
     WebCheckClient,
-    _with_retry,
+
 )
 
 
@@ -148,7 +148,7 @@ class TestResultCache:
         test_data = {"check": "ssl", "ok": True}
         
         cache.set("https://example.com", "ssl", test_data)
-        cache.get("https://example.com", "ssl")
+        result = cache.get("https://example.com", "ssl")
         
         assert result == test_data
         assert cache.hits == 1
