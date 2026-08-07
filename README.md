@@ -6,6 +6,12 @@
 [![Python](https://img.shields.io/pypi/pyversions/web-check-mcp)](https://pypi.org/project/web-check-mcp/)
 [![CI](https://github.com/AMEOBIUS-space/web-check-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/AMEOBIUS-space/web-check-mcp/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![codecov](https://codecov.io/gh/ameobius-ai/web-check-mcp/branch/main/graph/badge.svg)](https://codecov.io/gh/ameobius-ai/web-check-mcp)
+[![Security: bandit](https://img.shields.io/badge/security-bandit-yellow.svg)](https://github.com/PyCQA/bandit)
+[![code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![Imports: isort](https://img.shields.io/badge/%20imports-isort-%231674b1)](https://pycqa.github.io/isort/)
+[![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit)](https://github.com/pre-commit/pre-commit)
+
 
 > Agent wrapper for [Lissy93/web-check](https://github.com/Lissy93/web-check) — 31 OSINT checks as MCP tools + CLI.
 
