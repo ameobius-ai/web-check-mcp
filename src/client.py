@@ -275,6 +275,62 @@ class CircuitBreaker:
         self._last_failure_time = 0
 
 
+
+
+class RateLimiter:
+    """Token bucket rate limiter.
+    
+    Allows burst up to bucket_size, then limits to tokens_per_second.
+    """
+    
+    def __init__(self, tokens_per_second: float = 1.0, bucket_size: int = 10):
+        self.tokens_per_second = tokens_per_second
+        self.bucket_size = bucket_size
+        self.tokens = bucket_size
+        self.last_update = time.time()
+        self.total_wait_time = 0.0
+        self.total_waits = 0
+    
+    def _refill(self):
+        """Refill tokens based on elapsed time."""
+        now = time.time()
+        elapsed = now - self.last_update
+        self.tokens = min(self.bucket_size, self.tokens + elapsed * self.tokens_per_second)
+        self.last_update = now
+    
+    def acquire(self, timeout: float = 30.0) -> bool:
+        """Acquire a token, waiting if necessary. Returns False on timeout."""
+        start_time = time.time()
+        
+        while True:
+            self._refill()
+            
+            if self.tokens >= 1:
+                self.tokens -= 1
+                if self.total_waits > 0:
+                    self.total_wait_time += time.time() - start_time
+                return True
+            
+            # Not enough tokens, wait
+            if timeout > 0 and (time.time() - start_time) >= timeout:
+                return False
+            
+            # Wait for next token
+            wait_time = (1 - self.tokens) / self.tokens_per_second
+            time.sleep(min(wait_time, 0.1))  # Sleep in small increments
+            self.total_waits += 1
+    
+    def stats(self) -> dict:
+        """Return rate limiter statistics."""
+        return {
+            "tokens_per_second": self.tokens_per_second,
+            "bucket_size": self.bucket_size,
+            "current_tokens": round(self.tokens, 2),
+            "total_waits": self.total_waits,
+            "avg_wait_time": round(self.total_wait_time / self.total_waits, 3) if self.total_waits > 0 else 0
+        }
+
+
 class ResultCache:
     """Simple TTL-based in-memory cache for check results."""
     
