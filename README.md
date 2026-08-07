@@ -151,6 +151,45 @@ python3 -m pytest tests/ -v
 
 All network paths mocked — no live API required for CI.
 
+
+## Production Readiness Features (v0.4.0)
+
+### Reliability
+
+**Retry Logic** - Auto-retries transient failures (5xx, connection errors) with exponential backoff (1s, 2s, 4s). Configure: `WEB_CHECK_MAX_RETRIES` (default: 3)
+
+**Circuit Breaker** - Protects failing APIs. Per base_url tracking, opens after 5 failures, auto-recovers after 60s, fails fast when open.
+
+**Input Validation** - Validates URLs, check names, groups, timeouts. Clear error messages instead of exceptions.
+
+### Performance
+
+**Caching** - TTL-based cache reduces redundant API calls. Configure: `WEB_CHECK_CACHE_TTL` (default: 300s). Stats in health endpoint.
+
+**Rate Limiting** - Token bucket protects API. Configure: `WEB_CHECK_RATE_LIMIT` (default: 1.0 req/s). Burst: 10 requests.
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `WEB_CHECK_BASE_URL` | `https://web-check.as93.net/api` | API base URL |
+| `WEB_CHECK_TIMEOUT` | `25` | Request timeout (seconds) |
+| `WEB_CHECK_MAX_WORKERS` | `6` | Parallel workers |
+| `WEB_CHECK_MAX_CHARS` | `12000` | Max payload size |
+| `WEB_CHECK_MAX_RETRIES` | `3` | Retry attempts |
+| `WEB_CHECK_CACHE_TTL` | `300` | Cache TTL (seconds, 0=disabled) |
+| `WEB_CHECK_RATE_LIMIT` | `1.0` | Requests per second |
+
+## Production Deployment
+
+1. **Self-host Web Check API**: `docker run -p 3000:3000 lissy93/web-check`
+2. **Set `WEB_CHECK_BASE_URL`**: Point to your instance
+3. **Enable caching**: Configure `WEB_CHECK_CACHE_TTL`
+4. **Configure rate limiting**: Adjust `WEB_CHECK_RATE_LIMIT`
+5. **Monitor health endpoint**: Use cache/rate stats
+6. **Use Docker**: Non-root user, healthcheck included
+
+
 ## License
 
 MIT. Upstream Web Check © Alicia Sykes, MIT.
