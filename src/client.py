@@ -402,7 +402,7 @@ class WebCheckClient:
 
         ordered = [results[n] for n in names if n in results]
         ok_count = sum(1 for r in ordered if r.get("ok"))
-        bases_used = sorted({r.get("base_url") for r in ordered if r.get("base_url")})
+        bases_used: list[str] = sorted([str(r.get("base_url")) for r in ordered if r.get("base_url")])
         return {
             "url": target,
             "base_url": self.base_url,
