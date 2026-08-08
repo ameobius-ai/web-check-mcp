@@ -1,4 +1,4 @@
-name: One-shot Mypy Probe
+name: One-shot Mypy Repair
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  probe:
+  repair:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
@@ -23,22 +23,78 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Capture mypy diagnostics
+      - name: Apply asserted type-only patch
         run: |
-          python -m pip install mypy
-          {
-            mypy --version
-            set +e
-            mypy src/ --ignore-missing-imports
-            status=$?
-            set -e
-            echo "EXIT_CODE=$status"
-          } > .mypy-probe.log 2>&1
+          python - <<'PY'
+          from pathlib import Path
 
-      - name: Commit diagnostic log
+          path = Path("src/client.py")
+          text = path.read_text()
+          replacements = [
+              (
+                  "        self._last_failure_time = 0\n        self._last_success_time = 0",
+                  "        self._last_failure_time: float = 0.0\n        self._last_success_time: float = 0.0",
+              ),
+              (
+                  "        self._last_failure_time = 0\n\n\nclass RateLimiter:",
+                  "        self._last_failure_time = 0.0\n\n\nclass RateLimiter:",
+              ),
+              (
+                  "        self.tokens = bucket_size",
+                  "        self.tokens: float = float(bucket_size)",
+              ),
+              (
+                  "        self._cache: dict[str, tuple[float, Any]] = {}",
+                  "        self._cache: dict[str, tuple[float, dict[str, Any]]] = {}",
+              ),
+              (
+                  "    def get(self, url: str, check: str) -> Any | None:",
+                  "    def get(self, url: str, check: str) -> dict[str, Any] | None:",
+              ),
+              (
+                  "    def set(self, url: str, check: str, data: Any):",
+                  "    def set(self, url: str, check: str, data: dict[str, Any]) -> None:",
+              ),
+          ]
+          for old, new in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"expected exactly one match, got {count}: {old!r}")
+              text = text.replace(old, new)
+          path.write_text(text)
+
+          ci_path = Path(".github/workflows/ci.yml")
+          ci = ci_path.read_text()
+          old = "          pip install ruff==0.16.2 mypy"
+          new = "          pip install ruff==0.16.2 mypy==2.3.0"
+          count = ci.count(old)
+          if count != 1:
+              raise SystemExit(f"expected exactly one CI pin match, got {count}")
+          ci_path.write_text(ci.replace(old, new))
+          PY
+
+      - name: Install validation stack
         run: |
+          python -m pip install --upgrade pip
+          pip install ruff==0.16.2 mypy==2.3.0 pytest pytest-cov pytest-mock
+          pip install -e .
+
+      - name: Validate repair
+        run: |
+          ruff check --fix .
+          ruff format .
+          ruff check .
+          ruff format --check .
+          mypy src/ --ignore-missing-imports
+          pytest tests/ -q
+          python -m src.server --manifest > manifest.json
+          python -c "import json; d=json.load(open('manifest.json')); assert d['server']['name']=='web-check-mcp'; assert len(d['tools'])==8"
+
+      - name: Commit verified repair
+        run: |
+          rm -f .mypy-probe.log manifest.json
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .mypy-probe.log
-          git commit -m "ci: capture mypy diagnostics [skip mypy-probe]"
+          git add -A
+          git commit -m "fix: satisfy strict mypy cache and timing types [skip mypy-probe]"
           git push origin HEAD:style/ruff-format-pass
