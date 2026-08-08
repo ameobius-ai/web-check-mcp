@@ -1,0 +1,44 @@
+name: One-shot Mypy Probe
+
+on:
+  push:
+    branches:
+      - style/ruff-format-pass
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: style/ruff-format-pass
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Capture mypy diagnostics
+        run: |
+          python -m pip install mypy
+          {
+            mypy --version
+            set +e
+            mypy src/ --ignore-missing-imports
+            status=$?
+            set -e
+            echo "EXIT_CODE=$status"
+          } > .mypy-probe.log 2>&1
+
+      - name: Commit diagnostic log
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .mypy-probe.log
+          git commit -m "ci: capture mypy diagnostics [skip mypy-probe]"
+          git push origin HEAD:style/ruff-format-pass
