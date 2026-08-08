@@ -263,8 +263,8 @@ class CircuitBreaker:
         self.recovery_timeout = recovery_timeout
         self._state = self.CLOSED
         self._failure_count = 0
-        self._last_failure_time = 0
-        self._last_success_time = 0
+        self._last_failure_time: float = 0.0
+        self._last_success_time: float = 0.0
 
     @property
     def state(self) -> str:
@@ -296,7 +296,7 @@ class CircuitBreaker:
         """Manually reset circuit breaker."""
         self._state = self.CLOSED
         self._failure_count = 0
-        self._last_failure_time = 0
+        self._last_failure_time = 0.0
 
 
 class RateLimiter:
@@ -308,7 +308,7 @@ class RateLimiter:
     def __init__(self, tokens_per_second: float = 1.0, bucket_size: int = 10):
         self.tokens_per_second = tokens_per_second
         self.bucket_size = bucket_size
-        self.tokens = bucket_size
+        self.tokens: float = float(bucket_size)
         self.last_update = time.time()
         self.total_wait_time = 0.0
         self.total_waits = 0
@@ -358,7 +358,7 @@ class ResultCache:
 
     def __init__(self, ttl_seconds: int = 300):
         self.ttl = ttl_seconds
-        self._cache: dict[str, tuple[float, Any]] = {}
+        self._cache: dict[str, tuple[float, dict[str, Any]]] = {}
         self.hits = 0
         self.misses = 0
 
@@ -366,7 +366,7 @@ class ResultCache:
         """Create cache key from URL and check name."""
         return hashlib.sha256(f"{url}:{check}".encode()).hexdigest()
 
-    def get(self, url: str, check: str) -> Any | None:
+    def get(self, url: str, check: str) -> dict[str, Any] | None:
         """Get cached result if valid, else None."""
         if self.ttl <= 0:
             return None
@@ -384,7 +384,7 @@ class ResultCache:
         self.misses += 1
         return None
 
-    def set(self, url: str, check: str, data: Any):
+    def set(self, url: str, check: str, data: dict[str, Any]) -> None:
         """Cache result with current timestamp."""
         if self.ttl <= 0:
             return
