@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import ssl
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -300,57 +301,99 @@ class CircuitBreaker:
 
 
 class RateLimiter:
-    """Token bucket rate limiter.
+    """Thread-safe token bucket rate limiter.
 
-    Allows burst up to bucket_size, then limits to tokens_per_second.
+    Allows bursts up to ``bucket_size``, then limits traffic to
+    ``tokens_per_second``. A non-positive timeout waits indefinitely.
     """
 
-    def __init__(self, tokens_per_second: float = 1.0, bucket_size: int = 10):
-        self.tokens_per_second = tokens_per_second
+    def __init__(
+        self,
+        tokens_per_second: float = 1.0,
+        bucket_size: int = 10,
+        *,
+        clock: Callable[[], float] | None = None,
+        sleeper: Callable[[float], None] | None = None,
+    ):
+        if tokens_per_second <= 0:
+            raise ValueError("tokens_per_second must be greater than 0")
+        if bucket_size <= 0:
+            raise ValueError("bucket_size must be greater than 0")
+
+        self.tokens_per_second = float(tokens_per_second)
         self.bucket_size = bucket_size
         self.tokens: float = float(bucket_size)
-        self.last_update = time.time()
+        self._clock = clock
+        self._sleeper = sleeper
+        self._lock = threading.Lock()
+        self.last_update = self._now()
         self.total_wait_time = 0.0
         self.total_waits = 0
+        self.total_timeouts = 0
 
-    def _refill(self):
-        """Refill tokens based on elapsed time."""
-        now = time.time()
-        elapsed = now - self.last_update
-        self.tokens = min(self.bucket_size, self.tokens + elapsed * self.tokens_per_second)
+    def _now(self) -> float:
+        return self._clock() if self._clock is not None else time.monotonic()
+
+    def _sleep(self, seconds: float) -> None:
+        if self._sleeper is not None:
+            self._sleeper(seconds)
+        else:
+            time.sleep(seconds)
+
+    def _refill_locked(self, now: float) -> None:
+        elapsed = max(0.0, now - self.last_update)
+        self.tokens = min(float(self.bucket_size), self.tokens + elapsed * self.tokens_per_second)
         self.last_update = now
 
+    def _refill(self) -> None:
+        """Refill tokens based on elapsed monotonic time."""
+        with self._lock:
+            self._refill_locked(self._now())
+
     def acquire(self, timeout: float = 30.0) -> bool:
-        """Acquire a token, waiting if necessary. Returns False on timeout."""
-        start_time = time.time()
+        """Acquire one token; ``timeout <= 0`` waits indefinitely."""
+        started_at = self._now()
+        deadline = started_at + timeout if timeout > 0 else None
+        waited = False
 
         while True:
-            self._refill()
+            now = self._now()
+            with self._lock:
+                self._refill_locked(now)
+                if self.tokens >= 1.0:
+                    self.tokens -= 1.0
+                    if waited:
+                        self.total_waits += 1
+                        self.total_wait_time += max(0.0, now - started_at)
+                    return True
 
-            if self.tokens >= 1:
-                self.tokens -= 1
-                if self.total_waits > 0:
-                    self.total_wait_time += time.time() - start_time
-                return True
+                if deadline is not None and now >= deadline:
+                    self.total_timeouts += 1
+                    if waited:
+                        self.total_waits += 1
+                        self.total_wait_time += max(0.0, now - started_at)
+                    return False
 
-            # Not enough tokens, wait
-            if timeout > 0 and (time.time() - start_time) >= timeout:
-                return False
+                wait_time = (1.0 - self.tokens) / self.tokens_per_second
+                if deadline is not None:
+                    wait_time = min(wait_time, max(0.0, deadline - now))
 
-            # Wait for next token
-            wait_time = (1 - self.tokens) / self.tokens_per_second
-            time.sleep(min(wait_time, 0.1))  # Sleep in small increments
-            self.total_waits += 1
+            waited = True
+            self._sleep(max(0.001, min(wait_time, 0.1)))
 
-    def stats(self) -> dict:
-        """Return rate limiter statistics."""
-        return {
-            "tokens_per_second": self.tokens_per_second,
-            "bucket_size": self.bucket_size,
-            "current_tokens": round(self.tokens, 2),
-            "total_waits": self.total_waits,
-            "avg_wait_time": round(self.total_wait_time / self.total_waits, 3) if self.total_waits > 0 else 0,
-        }
+    def stats(self) -> dict[str, float | int]:
+        """Return an atomic snapshot of rate limiter statistics."""
+        with self._lock:
+            self._refill_locked(self._now())
+            return {
+                "tokens_per_second": self.tokens_per_second,
+                "bucket_size": self.bucket_size,
+                "current_tokens": round(self.tokens, 2),
+                "total_waits": self.total_waits,
+                "total_wait_time": round(self.total_wait_time, 3),
+                "avg_wait_time": (round(self.total_wait_time / self.total_waits, 3) if self.total_waits > 0 else 0),
+                "total_timeouts": self.total_timeouts,
+            }
 
 
 class ResultCache:
@@ -497,6 +540,8 @@ class WebCheckClient:
 
     @_with_retry()
     def _http_get(self, url: str) -> tuple[int, Any, str | None]:
+        self._rate_limiter.acquire(timeout=0.0)
+
         req = urllib.request.Request(
             url,
             headers={
@@ -708,6 +753,7 @@ class WebCheckClient:
             "fallback_enabled": self.fallback,
             "public_bases": PUBLIC_BASE_URLS,
             "cache_stats": self._cache.stats(),
+            "rate_limit_stats": self._rate_limiter.stats(),
             "hint": (
                 "Public web-check.xyz (Vercel) may 429 datacenter IPs; "
                 "Netlify mirror web-check.as93.net is more open. "
