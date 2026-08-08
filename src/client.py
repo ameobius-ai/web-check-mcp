@@ -700,7 +700,7 @@ class WebCheckClient:
             ),
         }
         # Omit the error key entirely when the probe succeeded, so MCP
-        # consumers see a clean payload instead of \"error\": null.
+        # consumers see a clean payload instead of "error": null.
         if probe.get("error"):
             report["error"] = probe["error"]
         return report
