@@ -6,6 +6,7 @@ prefer local Docker: `docker run -p 3000:3000 lissy93/web-check`.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import ssl
@@ -19,19 +20,23 @@ from functools import wraps
 from typing import Any
 
 def _with_retry(max_retries=None):
-    """Retry transient failures (5xx, connection errors) with exponential backoff."""
-    if max_retries is None:
-        max_retries = int(os.environ.get("WEB_CHECK_MAX_RETRIES", "3"))
-    
+    """Retry transient failures (5xx, connection errors) with exponential backoff.
+
+    WEB_CHECK_MAX_RETRIES is read per call (not at import time) so tests and
+    operators can tune it at runtime without re-importing the module.
+    """
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
+            retries = max_retries
+            if retries is None:
+                retries = int(os.environ.get("WEB_CHECK_MAX_RETRIES", "3"))
             last_error = None
-            for attempt in range(max_retries + 1):
+            for attempt in range(retries + 1):
                 try:
                     status, data, err = func(*args, **kwargs)
                     # Retry on 5xx errors and connection errors (status 0)
-                    if (status >= 500 or status == 0) and attempt < max_retries:
+                    if (status >= 500 or status == 0) and attempt < retries:
                         delay = 1.0 * (2 ** attempt)  # 1s, 2s, 4s
 
                         time.sleep(delay)
@@ -39,7 +44,7 @@ def _with_retry(max_retries=None):
                     return status, data, err
                 except Exception as e:
                     last_error = e
-                    if attempt < max_retries:
+                    if attempt < retries:
                         delay = 1.0 * (2 ** attempt)
                         time.sleep(delay)
                         continue
@@ -128,8 +133,12 @@ PUBLIC_BASE_URLS = [
 
 def _normalize_base(base_url: str) -> str:
     base = (base_url or DEFAULT_BASE_URL).rstrip("/")
-    # Accept host-only forms: http://localhost:3000 -> .../api
-    if not base.endswith("/api") and (base.endswith(":3000") or base.rstrip("/").endswith("web-check")):
+    if base.endswith("/api"):
+        return base
+    # Accept host-only forms: http://localhost:3000 -> .../api,
+    # https://web-check.xyz -> .../api
+    host = urllib.parse.urlparse(base).netloc
+    if host.endswith(":3000") or host == "web-check" or host.startswith("web-check."):
         base = base + "/api"
     return base
 
@@ -205,10 +214,6 @@ def truncate_payload(data: Any, max_chars: int = DEFAULT_MAX_CHARS) -> Any:
 
 
 
-import hashlib
-from typing import Optional
-
-
 class CircuitBreaker:
     """Circuit breaker pattern for failing APIs.
     
@@ -241,7 +246,6 @@ class CircuitBreaker:
         """Current circuit state, auto-transitions OPEN -> HALF_OPEN on timeout."""
         if self._state == self.OPEN and time.time() - self._last_failure_time >= self.recovery_timeout:
             self._state = self.HALF_OPEN
-        return self._state
         return self._state
     
     def can_execute(self) -> bool:
@@ -334,7 +338,7 @@ class ResultCache:
     
     def __init__(self, ttl_seconds: int = 300):
         self.ttl = ttl_seconds
-        self._cache: dict[str, tuple[float, any]] = {}
+        self._cache: dict[str, tuple[float, Any]] = {}
         self.hits = 0
         self.misses = 0
     
@@ -342,7 +346,7 @@ class ResultCache:
         """Create cache key from URL and check name."""
         return hashlib.sha256(f"{url}:{check}".encode()).hexdigest()
     
-    def get(self, url: str, check: str) -> any | None:
+    def get(self, url: str, check: str) -> Any | None:
         """Get cached result if valid, else None."""
         if self.ttl <= 0:
             return None
@@ -360,7 +364,7 @@ class ResultCache:
         self.misses += 1
         return None
     
-    def set(self, url: str, check: str, data: any):
+    def set(self, url: str, check: str, data: Any):
         """Cache result with current timestamp."""
         if self.ttl <= 0:
             return
@@ -416,6 +420,14 @@ class WebCheckClient:
             self.base_url.startswith("https://web-check.")
         )
         self._resolved_base: str | None = None
+        # Wave 4 production features: result cache, per-base circuit breakers
+        # and a token-bucket rate limiter. Env vars are read per instance so
+        # tests and operators can tune them without re-importing the module.
+        self._cache = ResultCache(ttl_seconds=int(os.environ.get("WEB_CHECK_CACHE_TTL", "300")))
+        self._circuit_breakers: dict[str, CircuitBreaker] = {}
+        self._rate_limiter = RateLimiter(
+            tokens_per_second=float(os.environ.get("WEB_CHECK_RATE_LIMIT", "1.0")),
+        )
 
     def list_checks(self, group: str | None = None) -> list[dict[str, str]]:
         if group:
@@ -657,7 +669,7 @@ class WebCheckClient:
         return {
             "url": target,
             "base_url": self.base_url,
-            "resolved_base_url": self._resolved_base or bases_used[0] if bases_used else None,
+            "resolved_base_url": self._resolved_base or (bases_used[0] if bases_used else None),
             "bases_used": bases_used,
             "checks_requested": names,
             "ok_count": ok_count,
@@ -672,12 +684,11 @@ class WebCheckClient:
         which base actually answered.
         """
         probe = self.check_one("get-ip", "https://example.com")
-        return {
+        report = {
             "base_url": self.base_url,
             "resolved_base_url": probe.get("base_url") or self._resolved_base,
             "reachable": bool(probe.get("ok")),
             "status": probe.get("status"),
-            "error": probe.get("error"),
             "fallback_enabled": self.fallback,
             "public_bases": PUBLIC_BASE_URLS,
             "cache_stats": self._cache.stats(),
@@ -688,3 +699,8 @@ class WebCheckClient:
                 "and set WEB_CHECK_BASE_URL=http://127.0.0.1:3000/api"
             ),
         }
+        # Omit the error key entirely when the probe succeeded, so MCP
+        # consumers see a clean payload instead of \"error\": null.
+        if probe.get("error"):
+            report["error"] = probe["error"]
+        return report

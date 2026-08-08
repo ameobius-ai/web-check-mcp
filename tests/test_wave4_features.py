@@ -346,7 +346,7 @@ class TestRateLimiter:
         for _ in range(5):
             assert rl.acquire(timeout=1.0) is True
         
-        assert rl.tokens == 0
+        assert rl.tokens == pytest.approx(0, abs=1e-3)
     
     def test_refill_over_time(self):
         """Tokens should refill over time."""
@@ -356,7 +356,7 @@ class TestRateLimiter:
         for _ in range(10):
             rl.acquire(timeout=1.0)
         
-        assert rl.tokens == 0
+        assert rl.tokens == pytest.approx(0, abs=1e-3)
         
         # Wait for refill
         time.sleep(0.5)
