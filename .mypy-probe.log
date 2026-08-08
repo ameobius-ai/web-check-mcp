@@ -1,0 +1,7 @@
+mypy 2.3.0 (compiled: yes)
+src/client.py:285: error: Incompatible types in assignment (expression has type "float", variable has type "int")  [assignment]
+src/client.py:290: error: Incompatible types in assignment (expression has type "float", variable has type "int")  [assignment]
+src/client.py:320: error: Incompatible types in assignment (expression has type "float", variable has type "int")  [assignment]
+src/client.py:581: error: Returning Any from function declared to return "dict[str, Any]"  [no-any-return]
+Found 4 errors in 1 file (checked 5 source files)
+EXIT_CODE=1
