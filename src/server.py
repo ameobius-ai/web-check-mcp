@@ -8,6 +8,7 @@ Modes:
   python -m src.server --manifest   # print tool manifest
   python -m src.server --cli ...    # CLI (see argparse)
 """
+
 from __future__ import annotations
 
 import argparse
@@ -27,53 +28,57 @@ from .client import (
     WebCheckClient,
 )
 
+
 def _validate_url(url: str) -> str:
     """Validate and normalize URL. Raises ValueError on invalid input."""
     if not url or not isinstance(url, str):
         raise ValueError("URL must be a non-empty string")
-    
+
     url = url.strip()
     if not url:
         raise ValueError("URL cannot be empty")
-    
+
     # Add https:// if missing
-    if not url.startswith(('http://', 'https://')):
-        url = 'https://' + url
-    
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+
     # Basic URL validation
     try:
         parsed = urlparse(url)
         if not parsed.netloc:
             raise ValueError(f"Invalid URL format: {url}")
         # Check for valid domain/IP
-        if not re.match(r'^[a-zA-Z0-9.-]+$', parsed.netloc.split(':')[0]):
+        if not re.match(r"^[a-zA-Z0-9.-]+$", parsed.netloc.split(":")[0]):
             raise ValueError(f"Invalid domain format: {parsed.netloc}")
     except Exception as e:
-        raise ValueError(f"Invalid URL: {url} - {str(e)}")
-    
+        raise ValueError(f"Invalid URL: {url} - {e!s}")
+
     return url
+
 
 def _validate_check_name(name: str) -> str:
     """Validate check name against CHECKS dict."""
     if not name or not isinstance(name, str):
         raise ValueError("Check name must be a non-empty string")
-    
-    name = name.strip().lstrip('/')
+
+    name = name.strip().lstrip("/")
     if name not in CHECKS:
         raise ValueError(f"Unknown check '{name}'. Use list_checks() to see available checks.")
-    
+
     return name
+
 
 def _validate_group_name(group: str) -> str:
     """Validate group name against CHECK_GROUPS dict."""
     if not group or not isinstance(group, str):
         raise ValueError("Group name must be a non-empty string")
-    
+
     group = group.strip()
     if group not in CHECK_GROUPS:
         raise ValueError(f"Unknown group '{group}'. Known: {', '.join(sorted(CHECK_GROUPS.keys()))}")
-    
+
     return group
+
 
 def _validate_positive_int(value: Any, name: str, min_val: int = 1, max_val: int = 1000) -> int:
     """Validate positive integer within range."""
@@ -222,9 +227,7 @@ class WebCheckMCPServer:
         self.version = version
         # Accept both default_base_url and legacy base_url kwarg
         resolved = default_base_url or base_url
-        self.default_base_url = resolved or os.environ.get(
-            "WEB_CHECK_BASE_URL", DEFAULT_BASE_URL
-        )
+        self.default_base_url = resolved or os.environ.get("WEB_CHECK_BASE_URL", DEFAULT_BASE_URL)
         self._opener = opener
         self._fallback = fallback
 
@@ -260,8 +263,7 @@ class WebCheckMCPServer:
     def handle_tool_call(self, name: str, args: dict[str, Any]) -> str:
         """Alias kept for backward-compat; delegates to call_tool."""
         return "\n".join(
-            item.get("text", "") if isinstance(item, dict) else str(item)
-            for item in self.call_tool(name, args)
+            item.get("text", "") if isinstance(item, dict) else str(item) for item in self.call_tool(name, args)
         )
 
     def call_tool(self, name: str, args: dict[str, Any]) -> list[dict[str, Any]]:
@@ -271,7 +273,14 @@ class WebCheckMCPServer:
         try:
             if name == "webcheck_list_checks" and args.get("group"):
                 _validate_group_name(args["group"])
-            elif name in ["webcheck_ssl", "webcheck_dns", "webcheck_headers", "webcheck_whois", "webcheck_security", "webcheck_run"]:
+            elif name in [
+                "webcheck_ssl",
+                "webcheck_dns",
+                "webcheck_headers",
+                "webcheck_whois",
+                "webcheck_security",
+                "webcheck_run",
+            ]:
                 if "url" in args:
                     _validate_url(args["url"])
                 if "timeout" in args:
@@ -325,18 +334,27 @@ class WebCheckMCPServer:
 
             if name == "webcheck_security":
                 client = self._client(args)
-                return [{"type": "text", "text": json.dumps(
-                    client.run(url=args["url"], group="security", max_workers=args.get("max_workers")),
-                    ensure_ascii=False,
-                )}]
+                return [
+                    {
+                        "type": "text",
+                        "text": json.dumps(
+                            client.run(url=args["url"], group="security", max_workers=args.get("max_workers")),
+                            ensure_ascii=False,
+                        ),
+                    }
+                ]
 
             if name == "webcheck_headers":
                 client = self._client(args)
-                return [{"type": "text", "text": json.dumps(client.check_one("headers", args["url"]), ensure_ascii=False)}]
+                return [
+                    {"type": "text", "text": json.dumps(client.check_one("headers", args["url"]), ensure_ascii=False)}
+                ]
 
             if name == "webcheck_whois":
                 client = self._client(args)
-                return [{"type": "text", "text": json.dumps(client.check_one("whois", args["url"]), ensure_ascii=False)}]
+                return [
+                    {"type": "text", "text": json.dumps(client.check_one("whois", args["url"]), ensure_ascii=False)}
+                ]
 
             return [{"type": "text", "text": json.dumps({"error": f"Unknown tool: {name}"})}]
         except KeyError as e:
@@ -358,9 +376,7 @@ def _run_stdio() -> None:
 
 
 def _cli(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="web-check-mcp — agent wrapper for Lissy93 Web Check API"
-    )
+    parser = argparse.ArgumentParser(description="web-check-mcp — agent wrapper for Lissy93 Web Check API")
     parser.add_argument("--stdio", action="store_true", help="STDIO JSON-RPC MCP mode (dual-mode framing)")
     parser.add_argument("--manifest", action="store_true", help="Print MCP manifest JSON")
     parser.add_argument(

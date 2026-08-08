@@ -1,4 +1,5 @@
 """Tests for dual-mode MCP stdio framing (WC-010)."""
+
 from __future__ import annotations
 
 import io
@@ -47,11 +48,7 @@ class TestDecoding:
         assert msg["method"] == "ping"
 
     def test_reads_content_length(self):
-        msgs = list(
-            iter_messages(
-                _stream({"jsonrpc": "2.0", "id": 7, "method": "initialize"}, mode=CONTENT_LENGTH)
-            )
-        )
+        msgs = list(iter_messages(_stream({"jsonrpc": "2.0", "id": 7, "method": "initialize"}, mode=CONTENT_LENGTH)))
         assert len(msgs) == 1
         msg, mode, err = msgs[0]
         assert err is None

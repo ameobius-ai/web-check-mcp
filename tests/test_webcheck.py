@@ -1,4 +1,5 @@
 """Tests for web-check-mcp — client + MCP server (mocked network)."""
+
 from __future__ import annotations
 
 import json
@@ -14,6 +15,7 @@ from src.client import CHECK_GROUPS, CHECKS, WebCheckClient, truncate_payload
 from src.server import TOOL_DEFS, WebCheckMCPServer, _cli
 
 # ── fixtures ──────────────────────────────────────────────────────────────
+
 
 def _ok_payload(check: str) -> dict[str, Any]:
     return {"check": check, "ok": True, "sample": True, "value": "x" * 20}
@@ -38,6 +40,7 @@ class FakeOpener:
 
 
 # ── catalog ───────────────────────────────────────────────────────────────
+
 
 class TestCatalog:
     def test_check_count(self):
@@ -80,6 +83,7 @@ class TestCatalog:
 
 # ── truncate ──────────────────────────────────────────────────────────────
 
+
 class TestTruncate:
     def test_small_passthrough(self):
         data = {"a": 1}
@@ -100,6 +104,7 @@ class TestTruncate:
 
 
 # ── client ────────────────────────────────────────────────────────────────
+
 
 class TestClient:
     def test_check_one_ok(self):
@@ -232,6 +237,7 @@ class TestClient:
 
 # ── MCP server ────────────────────────────────────────────────────────────
 
+
 class TestMCPServer:
     def test_tool_count(self):
         assert len(TOOL_DEFS) == 8
@@ -295,6 +301,7 @@ class TestMCPServer:
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────
+
 
 class TestCLI:
     def test_manifest_cli(self, capsys):
