@@ -75,18 +75,17 @@ def _validate_group_name(group: str) -> str:
     
     return group
 
-def _validate_positive_int(value: any, name: str, min_val: int = 1, max_val: int = 1000) -> int:
+def _validate_positive_int(value: Any, name: str, min_val: int = 1, max_val: int = 1000) -> int:
     """Validate positive integer within range."""
     try:
         val = int(value)
-        if val < min_val or val > max_val:
-            raise ValueError(f"{name} must be between {min_val} and {max_val}, got {val}")
-        return val
     except (TypeError, ValueError):
         raise ValueError(f"{name} must be a valid integer")
+    if val < min_val or val > max_val:
+        raise ValueError(f"{name} must be between {min_val} and {max_val}, got {val}")
+    return val
 
 
-    CHECKS,
 _READ_OPEN = {
     "readOnlyHint": True,
     "openWorldHint": True,
