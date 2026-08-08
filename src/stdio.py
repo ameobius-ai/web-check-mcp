@@ -15,6 +15,7 @@ Run standalone::
 from __future__ import annotations
 
 import json
+import os
 import sys
 from collections.abc import Iterator
 from typing import Any, TextIO
@@ -95,6 +96,22 @@ def write_message(obj: dict[str, Any], mode: str, out: TextIO | None = None) -> 
     dest.flush()
 
 
+def _silence_broken_stdout(out_stream: TextIO) -> None:
+    """Redirect process stdout after the MCP host closes its pipe."""
+    if out_stream is not sys.stdout:
+        return
+
+    try:
+        devnull_fd = os.open(os.devnull, os.O_WRONLY)
+        try:
+            os.dup2(devnull_fd, out_stream.fileno())
+        finally:
+            os.close(devnull_fd)
+    except (OSError, ValueError):
+        # Best-effort cleanup: the host has already disconnected.
+        pass
+
+
 def handle_rpc(server: Any, request: dict[str, Any]) -> tuple[dict[str, Any] | None, bool]:
     """Dispatch one JSON-RPC request against an MCP server object.
 
@@ -169,21 +186,24 @@ def run_stdio(
     in_stream = stdin if stdin is not None else sys.stdin
     out_stream = stdout if stdout is not None else sys.stdout
 
-    for message, frame_mode, err in iter_messages(in_stream):
-        mode = frame_mode or mode
-        if err is not None or message is None:
-            write_message(
-                {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}},
-                mode,
-                out_stream,
-            )
-            continue
+    try:
+        for message, frame_mode, err in iter_messages(in_stream):
+            mode = frame_mode or mode
+            if err is not None or message is None:
+                write_message(
+                    {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}},
+                    mode,
+                    out_stream,
+                )
+                continue
 
-        response, stop = handle_rpc(server, message)
-        if response is not None:
-            write_message(response, mode, out_stream)
-        if stop:
-            break
+            response, stop = handle_rpc(server, message)
+            if response is not None:
+                write_message(response, mode, out_stream)
+            if stop:
+                break
+    except BrokenPipeError:
+        _silence_broken_stdout(out_stream)
 
 
 def main() -> None:

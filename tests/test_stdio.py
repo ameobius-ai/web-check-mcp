@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import subprocess
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -23,6 +24,21 @@ from src.stdio import (
 
 def _stream(*requests, mode=NDJSON):
     return io.StringIO("".join(encode_message(r, mode) for r in requests))
+
+
+class _BrokenPipeOnFlush:
+    def __init__(self):
+        self._value = ""
+
+    def write(self, value: str) -> int:
+        self._value += value
+        return len(value)
+
+    def flush(self) -> None:
+        raise BrokenPipeError(32, "Broken pipe")
+
+    def getvalue(self) -> str:
+        return self._value
 
 
 class TestEncoding:
@@ -153,3 +169,42 @@ class TestStdioLoop:
         stdout = io.StringIO()
         run_stdio(server=WebCheckMCPServer(), stdin=io.StringIO("{oops\n"), stdout=stdout)
         assert json.loads(stdout.getvalue())["error"]["code"] == -32700
+
+    def test_broken_pipe_from_injected_stdout_exits_quietly(self):
+        stdout = _BrokenPipeOnFlush()
+        stdin = _stream({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
+
+        run_stdio(server=WebCheckMCPServer(), stdin=stdin, stdout=stdout)
+
+        assert json.loads(stdout.getvalue())["id"] == 1
+
+    def test_subprocess_exits_cleanly_when_host_closes_output_pipe(self):
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "src.server", "--stdio"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        assert proc.stdin is not None
+        assert proc.stdout is not None
+        assert proc.stderr is not None
+
+        try:
+            proc.stdout.close()
+            proc.stdin.write(
+                encode_message({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
+            )
+            proc.stdin.close()
+            return_code = proc.wait(timeout=5)
+            stderr = proc.stderr.read()
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait(timeout=5)
+            if not proc.stdin.closed:
+                proc.stdin.close()
+            proc.stderr.close()
+
+        assert return_code == 0
+        assert stderr == ""
