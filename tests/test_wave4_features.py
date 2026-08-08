@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 import time
-from unittest.mock import patch
+from concurrent.futures import ThreadPoolExecutor
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -34,6 +36,25 @@ class FakeOpener:
             self.call_count += 1
             return response
         return 200, {"ok": True}
+
+
+class FakeClock:
+    """Deterministic monotonic clock for rate-limit tests."""
+
+    def __init__(self):
+        self.now = 0.0
+        self.sleeps = []
+
+    def __call__(self):
+        return self.now
+
+    def sleep(self, seconds):
+        assert seconds >= 0
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+    def advance(self, seconds):
+        self.now += seconds
 
 
 class TestRetryLogic:
@@ -315,74 +336,150 @@ class TestCircuitBreaker:
 
 
 class TestRateLimiter:
-    """Test token bucket rate limiter."""
+    """Test token bucket rate limiting and HTTP-path integration."""
 
     def test_initial_tokens(self):
-        """Rate limiter should start with bucket_size tokens."""
-        rl = RateLimiter(tokens_per_second=1.0, bucket_size=10)
-        assert rl.tokens == 10
+        limiter = RateLimiter(tokens_per_second=1.0, bucket_size=10)
+        assert limiter.tokens == 10
 
     def test_acquire_reduces_tokens(self):
-        """Acquiring token should reduce available tokens."""
-        rl = RateLimiter(tokens_per_second=1.0, bucket_size=10)
+        clock = FakeClock()
+        limiter = RateLimiter(tokens_per_second=1.0, bucket_size=10, clock=clock, sleeper=clock.sleep)
 
-        assert rl.acquire(timeout=1.0) is True
-        assert rl.tokens == 9
+        assert limiter.acquire(timeout=1.0) is True
+        assert limiter.tokens == 9
 
     def test_burst_capacity(self):
-        """Should allow burst up to bucket_size."""
-        rl = RateLimiter(tokens_per_second=1.0, bucket_size=5)
+        clock = FakeClock()
+        limiter = RateLimiter(tokens_per_second=1.0, bucket_size=5, clock=clock, sleeper=clock.sleep)
 
-        # Should be able to acquire 5 tokens immediately
         for _ in range(5):
-            assert rl.acquire(timeout=1.0) is True
+            assert limiter.acquire(timeout=1.0) is True
 
-        assert rl.tokens == pytest.approx(0, abs=1e-3)
+        assert limiter.tokens == pytest.approx(0, abs=1e-3)
+        assert clock.now == 0
 
     def test_refill_over_time(self):
-        """Tokens should refill over time."""
-        rl = RateLimiter(tokens_per_second=10.0, bucket_size=10)
+        clock = FakeClock()
+        limiter = RateLimiter(tokens_per_second=10.0, bucket_size=10, clock=clock, sleeper=clock.sleep)
 
-        # Use all tokens
         for _ in range(10):
-            rl.acquire(timeout=1.0)
+            limiter.acquire(timeout=1.0)
 
-        assert rl.tokens == pytest.approx(0, abs=1e-3)
+        clock.advance(0.5)
+        limiter._refill()
 
-        # Wait for refill
-        time.sleep(0.5)
-        rl._refill()
-
-        assert rl.tokens >= 4  # Should have ~5 tokens (10/sec * 0.5s)
+        assert limiter.tokens == pytest.approx(5.0)
 
     def test_timeout_on_empty_bucket(self):
-        """Should timeout when bucket empty and no refill."""
-        rl = RateLimiter(tokens_per_second=0.1, bucket_size=1)
+        clock = FakeClock()
+        limiter = RateLimiter(tokens_per_second=0.1, bucket_size=1, clock=clock, sleeper=clock.sleep)
 
-        # Use the only token
-        rl.acquire(timeout=1.0)
-
-        # Next acquire should timeout quickly
-        assert rl.acquire(timeout=0.5) is False
+        assert limiter.acquire(timeout=1.0) is True
+        assert limiter.acquire(timeout=0.5) is False
+        assert clock.now == pytest.approx(0.5)
+        assert limiter.stats()["total_timeouts"] == 1
 
     def test_stats(self):
-        """Rate limiter should track statistics."""
-        rl = RateLimiter(tokens_per_second=1.0, bucket_size=10)
+        clock = FakeClock()
+        limiter = RateLimiter(tokens_per_second=1.0, bucket_size=10, clock=clock, sleeper=clock.sleep)
 
-        rl.acquire(timeout=1.0)
-        rl.acquire(timeout=1.0)
+        limiter.acquire(timeout=1.0)
+        limiter.acquire(timeout=1.0)
 
-        stats = rl.stats()
+        stats = limiter.stats()
         assert stats["tokens_per_second"] == 1.0
         assert stats["bucket_size"] == 10
         assert stats["current_tokens"] == 8
         assert stats["total_waits"] == 0
+        assert stats["total_timeouts"] == 0
 
     def test_env_var_configuration(self):
-        """Should respect WEB_CHECK_RATE_LIMIT env var."""
         with patch.dict(os.environ, {"WEB_CHECK_RATE_LIMIT": "2.5"}):
             client = WebCheckClient()
             assert client._rate_limiter.tokens_per_second == 2.5
+
+    def test_rejects_non_positive_configuration(self):
+        with pytest.raises(ValueError, match="tokens_per_second"):
+            RateLimiter(tokens_per_second=0)
+        with pytest.raises(ValueError, match="bucket_size"):
+            RateLimiter(bucket_size=0)
+
+    def test_sequential_http_attempts_follow_fake_clock_rate(self):
+        clock = FakeClock()
+        limiter = RateLimiter(tokens_per_second=2.0, bucket_size=2, clock=clock, sleeper=clock.sleep)
+        opener = FakeOpener([(200, {"ok": True}) for _ in range(5)])
+        client = WebCheckClient(base_url="https://test.com/api", opener=opener, fallback=False)
+        client._rate_limiter = limiter
+
+        for index in range(5):
+            status, _data, error = client._http_get(f"https://test.com/api/status?n={index}")
+            assert status == 200
+            assert error is None
+
+        assert opener.call_count == 5
+        assert clock.now == pytest.approx((5 - 2) / 2.0)
+        assert limiter.stats()["total_waits"] == 3
+
+    def test_rate_limiter_is_consulted_on_every_retry_attempt(self):
+        opener = FakeOpener([(500, {"error": "retry"}), (200, {"ok": True})])
+        client = WebCheckClient(base_url="https://test.com/api", opener=opener, fallback=False)
+        limiter = Mock(spec=RateLimiter)
+        limiter.acquire.return_value = True
+        client._rate_limiter = limiter
+
+        with patch.object(time, "sleep"):
+            result = client.check_one("ssl", "example.com")
+
+        assert result["ok"] is True
+        assert opener.call_count == 2
+        assert limiter.acquire.call_count == 2
+        limiter.acquire.assert_called_with(timeout=0.0)
+
+    def test_cache_hit_does_not_consume_another_token(self):
+        opener = FakeOpener([(200, {"ok": True})])
+        with patch.dict(os.environ, {"WEB_CHECK_CACHE_TTL": "300"}):
+            client = WebCheckClient(base_url="https://test.com/api", opener=opener, fallback=False)
+        limiter = Mock(spec=RateLimiter)
+        limiter.acquire.return_value = True
+        client._rate_limiter = limiter
+
+        first = client.check_one("ssl", "example.com")
+        second = client.check_one("ssl", "example.com")
+
+        assert first["ok"] is True
+        assert second["cached"] is True
+        assert opener.call_count == 1
+        assert limiter.acquire.call_count == 1
+
+    def test_health_exposes_rate_limit_stats(self):
+        clock = FakeClock()
+        limiter = RateLimiter(tokens_per_second=2.0, bucket_size=2, clock=clock, sleeper=clock.sleep)
+        client = WebCheckClient(
+            base_url="https://test.com/api",
+            opener=FakeOpener([(200, {"ip": "1.2.3.4"})]),
+            fallback=False,
+        )
+        client._rate_limiter = limiter
+
+        health = client.health()
+
+        assert health["rate_limit_stats"] == limiter.stats()
+        assert health["rate_limit_stats"]["current_tokens"] == 1.0
+
+    def test_concurrent_burst_never_overspends_bucket(self):
+        limiter = RateLimiter(tokens_per_second=0.001, bucket_size=3)
+        barrier = threading.Barrier(12)
+
+        def acquire_once(_index):
+            barrier.wait()
+            return limiter.acquire(timeout=0.02)
+
+        with ThreadPoolExecutor(max_workers=12) as pool:
+            outcomes = list(pool.map(acquire_once, range(12)))
+
+        assert sum(outcomes) == 3
+        assert limiter.stats()["total_timeouts"] == 9
 
 
 class TestInputValidation:
