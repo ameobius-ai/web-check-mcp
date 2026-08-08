@@ -2,6 +2,7 @@
 
 Run: python examples/library_demo.py
 """
+
 import json
 import os
 import sys
@@ -27,10 +28,7 @@ print(json.dumps(result, indent=2)[:800])
 
 print("\n== Quick recon for example.com ==")
 recon = client.run("example.com", group="quick")
-print(
-    f"base={recon['resolved_base_url']} "
-    f"ok={recon['ok_count']}/{len(recon['results'])}"
-)
+print(f"base={recon['resolved_base_url']} ok={recon['ok_count']}/{len(recon['results'])}")
 for r in recon["results"]:
     mark = "OK" if r["ok"] else "FAIL"
     print(f"  {r['check']:14s} {r['status']:3d} {mark}")

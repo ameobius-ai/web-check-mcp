@@ -12,6 +12,7 @@ Usage:
     python scripts/live_smoke.py --url github.com --group quick
     python scripts/live_smoke.py --base http://127.0.0.1:3000/api --strict
 """
+
 from __future__ import annotations
 
 import argparse

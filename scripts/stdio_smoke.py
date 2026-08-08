@@ -1,4 +1,5 @@
 """Manual stdio smoke test: NDJSON + Content-Length framing against the real server process."""
+
 import json
 import subprocess
 import sys
@@ -7,8 +8,9 @@ CMD = [sys.executable, "-m", "src.server", "--stdio"]
 
 
 def ndjson_session():
-    proc = subprocess.Popen(CMD, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE, text=True, cwd="/data/web-check-mcp")
+    proc = subprocess.Popen(
+        CMD, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd="/data/web-check-mcp"
+    )
     msgs = [
         {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05"}},
         {"jsonrpc": "2.0", "method": "notifications/initialized"},
@@ -24,8 +26,9 @@ def ndjson_session():
 
 
 def content_length_session():
-    proc = subprocess.Popen(CMD, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE, text=True, cwd="/data/web-check-mcp")
+    proc = subprocess.Popen(
+        CMD, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd="/data/web-check-mcp"
+    )
     msgs = [
         {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
         {"jsonrpc": "2.0", "id": 2, "method": "ping"},

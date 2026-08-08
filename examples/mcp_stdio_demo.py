@@ -2,6 +2,7 @@
 
 Pipes a tools/list then a tools/call and prints the response.
 """
+
 import json
 import subprocess
 import sys

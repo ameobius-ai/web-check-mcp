@@ -11,6 +11,7 @@ Run standalone::
 
     python -m src.stdio
 """
+
 from __future__ import annotations
 
 import json

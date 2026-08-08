@@ -4,6 +4,7 @@ Pure stdlib. Talks to a self-hosted (or demo) Web Check API base URL.
 Public demo at https://web-check.xyz often returns 403 from datacenter IPs;
 prefer local Docker: `docker run -p 3000:3000 lissy93/web-check`.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -19,12 +20,14 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import wraps
 from typing import Any
 
+
 def _with_retry(max_retries=None):
     """Retry transient failures (5xx, connection errors) with exponential backoff.
 
     WEB_CHECK_MAX_RETRIES is read per call (not at import time) so tests and
     operators can tune it at runtime without re-importing the module.
     """
+
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -37,7 +40,7 @@ def _with_retry(max_retries=None):
                     status, data, err = func(*args, **kwargs)
                     # Retry on 5xx errors and connection errors (status 0)
                     if (status >= 500 or status == 0) and attempt < retries:
-                        delay = 1.0 * (2 ** attempt)  # 1s, 2s, 4s
+                        delay = 1.0 * (2**attempt)  # 1s, 2s, 4s
 
                         time.sleep(delay)
                         continue
@@ -45,12 +48,14 @@ def _with_retry(max_retries=None):
                 except Exception as e:
                     last_error = e
                     if attempt < retries:
-                        delay = 1.0 * (2 ** attempt)
+                        delay = 1.0 * (2**attempt)
                         time.sleep(delay)
                         continue
                     raise
             return 0, {"error": str(last_error)}, str(last_error)
+
         return wrapper
+
     return decorator
 
 
@@ -58,36 +63,36 @@ def _with_retry(max_retries=None):
 # 'param' overrides the default query-param name ('url') when the upstream spec
 # uses a different name.  Without 'param', the client sends ?url=<target>.
 CHECKS: dict[str, dict[str, str]] = {
-    "archives":     {"path": "/archives",     "group": "quality",   "summary": "Wayback archive first/last scan"},
-    "block-lists":  {"path": "/block-lists",  "group": "security",  "summary": "Blocklist membership"},
-    "carbon":       {"path": "/carbon",       "group": "quality",   "summary": "Carbon footprint estimate"},
-    "cookies":      {"path": "/cookies",      "group": "server",    "summary": "HTTP cookies"},
-    "dns":          {"path": "/dns",          "group": "server",    "summary": "DNS records"},
-    "dns-server":   {"path": "/dns-server",   "group": "server",    "summary": "Authoritative DNS server info"},
-    "dnssec":       {"path": "/dnssec",       "group": "security",  "summary": "DNSSEC status"},
-    "firewall":     {"path": "/firewall",     "group": "security",  "summary": "WAF / firewall detection"},
-    "get-ip":       {"path": "/get-ip",       "group": "server",    "summary": "Resolved IP address info"},
-    "headers":      {"path": "/headers",      "group": "server",    "summary": "HTTP response headers"},
-    "hsts":         {"path": "/hsts",         "group": "security",  "summary": "HSTS policy"},
-    "http-security":{"path": "/http-security","group": "security",  "summary": "Security headers score"},
-    "linked-pages": {"path": "/linked-pages", "group": "quality",   "summary": "Outbound / internal links"},
-    "mail-config":  {"path": "/mail-config",  "group": "server",    "summary": "SPF/DKIM/DMARC/BIMI"},
-    "ports":        {"path": "/ports",        "group": "server",    "summary": "Common open ports (slow)"},
+    "archives": {"path": "/archives", "group": "quality", "summary": "Wayback archive first/last scan"},
+    "block-lists": {"path": "/block-lists", "group": "security", "summary": "Blocklist membership"},
+    "carbon": {"path": "/carbon", "group": "quality", "summary": "Carbon footprint estimate"},
+    "cookies": {"path": "/cookies", "group": "server", "summary": "HTTP cookies"},
+    "dns": {"path": "/dns", "group": "server", "summary": "DNS records"},
+    "dns-server": {"path": "/dns-server", "group": "server", "summary": "Authoritative DNS server info"},
+    "dnssec": {"path": "/dnssec", "group": "security", "summary": "DNSSEC status"},
+    "firewall": {"path": "/firewall", "group": "security", "summary": "WAF / firewall detection"},
+    "get-ip": {"path": "/get-ip", "group": "server", "summary": "Resolved IP address info"},
+    "headers": {"path": "/headers", "group": "server", "summary": "HTTP response headers"},
+    "hsts": {"path": "/hsts", "group": "security", "summary": "HSTS policy"},
+    "http-security": {"path": "/http-security", "group": "security", "summary": "Security headers score"},
+    "linked-pages": {"path": "/linked-pages", "group": "quality", "summary": "Outbound / internal links"},
+    "mail-config": {"path": "/mail-config", "group": "server", "summary": "SPF/DKIM/DMARC/BIMI"},
+    "ports": {"path": "/ports", "group": "server", "summary": "Common open ports (slow)"},
     # /quality also requires ?apiKey= (Google PageSpeed); without it the server
     # returns 204 Skipped.  The apiKey must be set via the web-check backend env.
     "quality": {"path": "/quality", "group": "quality", "summary": "Page quality metrics (needs apiKey on server)"},
-    "rank":         {"path": "/rank",         "group": "quality",   "summary": "Tranco / popularity rank"},
-    "redirects":    {"path": "/redirects",    "group": "server",    "summary": "Redirect chain"},
-    "robots-txt":   {"path": "/robots-txt",   "group": "quality",   "summary": "robots.txt parse"},
-    "screenshot":   {"path": "/screenshot",   "group": "quality",   "summary": "Page screenshot (heavy)"},
-    "security-txt": {"path": "/security-txt", "group": "security",  "summary": "security.txt"},
-    "sitemap":      {"path": "/sitemap",      "group": "quality",   "summary": "sitemap.xml"},
-    "social-tags":  {"path": "/social-tags",  "group": "quality",   "summary": "Open Graph / Twitter cards"},
-    "ssl":          {"path": "/ssl",          "group": "security",  "summary": "SSL certificate chain"},
-    "status":       {"path": "/status",       "group": "server",    "summary": "HTTP status / reachability"},
-    "tech-stack":   {"path": "/tech-stack",   "group": "quality",   "summary": "Detected technologies"},
-    "threats":      {"path": "/threats",      "group": "security",  "summary": "Threat / malware signals"},
-    "tls":          {"path": "/tls",          "group": "security",  "summary": "TLS config / ciphers"},
+    "rank": {"path": "/rank", "group": "quality", "summary": "Tranco / popularity rank"},
+    "redirects": {"path": "/redirects", "group": "server", "summary": "Redirect chain"},
+    "robots-txt": {"path": "/robots-txt", "group": "quality", "summary": "robots.txt parse"},
+    "screenshot": {"path": "/screenshot", "group": "quality", "summary": "Page screenshot (heavy)"},
+    "security-txt": {"path": "/security-txt", "group": "security", "summary": "security.txt"},
+    "sitemap": {"path": "/sitemap", "group": "quality", "summary": "sitemap.xml"},
+    "social-tags": {"path": "/social-tags", "group": "quality", "summary": "Open Graph / Twitter cards"},
+    "ssl": {"path": "/ssl", "group": "security", "summary": "SSL certificate chain"},
+    "status": {"path": "/status", "group": "server", "summary": "HTTP status / reachability"},
+    "tech-stack": {"path": "/tech-stack", "group": "quality", "summary": "Detected technologies"},
+    "threats": {"path": "/threats", "group": "security", "summary": "Threat / malware signals"},
+    "tls": {"path": "/tls", "group": "security", "summary": "TLS config / ciphers"},
     # /trace-route uses ?urlString= per upstream OpenAPI spec
     "trace-route": {"path": "/trace-route", "group": "server", "summary": "Traceroute (slow)", "param": "urlString"},
     # /txt-records and /whois use ?domain= per upstream OpenAPI spec
@@ -98,16 +103,39 @@ CHECKS: dict[str, dict[str, str]] = {
 CHECK_GROUPS: dict[str, list[str]] = {
     "quick": ["get-ip", "status", "headers", "dns", "ssl", "redirects"],
     "security": [
-        "ssl", "tls", "hsts", "http-security", "firewall", "dnssec",
-        "security-txt", "threats", "block-lists",
+        "ssl",
+        "tls",
+        "hsts",
+        "http-security",
+        "firewall",
+        "dnssec",
+        "security-txt",
+        "threats",
+        "block-lists",
     ],
     "server": [
-        "get-ip", "dns", "dns-server", "ports", "cookies", "headers",
-        "whois", "mail-config", "txt-records", "redirects", "status",
+        "get-ip",
+        "dns",
+        "dns-server",
+        "ports",
+        "cookies",
+        "headers",
+        "whois",
+        "mail-config",
+        "txt-records",
+        "redirects",
+        "status",
     ],
     "quality": [
-        "quality", "rank", "carbon", "tech-stack", "social-tags",
-        "archives", "robots-txt", "sitemap", "linked-pages",
+        "quality",
+        "rank",
+        "carbon",
+        "tech-stack",
+        "social-tags",
+        "archives",
+        "robots-txt",
+        "sitemap",
+        "linked-pages",
     ],
     "heavy": ["screenshot", "ports", "trace-route", "quality"],
     "all": sorted(CHECKS.keys()),
@@ -118,16 +146,14 @@ DEFAULT_TIMEOUT = int(os.environ.get("WEB_CHECK_TIMEOUT", "25"))
 DEFAULT_MAX_WORKERS = int(os.environ.get("WEB_CHECK_MAX_WORKERS", "6"))
 DEFAULT_MAX_CHARS = int(os.environ.get("WEB_CHECK_MAX_CHARS", "12000"))
 USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/120.0.0.0 Safari/537.36"
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
 
 # Ordered list of bases tried on health/run if primary fails.
 # Vercel often challenges datacenter IPs with 429; Netlify mirror is more open.
 PUBLIC_BASE_URLS = [
     "https://web-check.as93.net/api",  # Netlify — Cloudflare front, more permissive
-    "https://web-check.xyz/api",       # Vercel primary (UI works from browser, API may 429)
+    "https://web-check.xyz/api",  # Vercel primary (UI works from browser, API may 429)
 ]
 
 
@@ -213,115 +239,109 @@ def truncate_payload(data: Any, max_chars: int = DEFAULT_MAX_CHARS) -> Any:
     return {"_truncated": True, "preview": raw[: max_chars - 40] + "…"}
 
 
-
 class CircuitBreaker:
     """Circuit breaker pattern for failing APIs.
-    
+
     States:
     - CLOSED: Normal operation, requests pass through
     - OPEN: Circuit tripped, fail fast without making requests
     - HALF_OPEN: Testing if service recovered, allow one probe request
-    
+
     Transitions:
     - CLOSED -> OPEN: After failure_threshold consecutive failures
     - OPEN -> HALF_OPEN: After recovery_timeout seconds
     - HALF_OPEN -> CLOSED: On successful request
     - HALF_OPEN -> OPEN: On failed request
     """
-    
+
     CLOSED = "closed"
     OPEN = "open"
     HALF_OPEN = "half_open"
-    
+
     def __init__(self, failure_threshold: int = 5, recovery_timeout: int = 60):
         self.failure_threshold = failure_threshold
         self.recovery_timeout = recovery_timeout
         self._state = self.CLOSED
         self._failure_count = 0
-        self._last_failure_time = 0
-        self._last_success_time = 0
-    
+        self._last_failure_time: float = 0.0
+        self._last_success_time: float = 0.0
+
     @property
     def state(self) -> str:
         """Current circuit state, auto-transitions OPEN -> HALF_OPEN on timeout."""
         if self._state == self.OPEN and time.time() - self._last_failure_time >= self.recovery_timeout:
             self._state = self.HALF_OPEN
         return self._state
-    
+
     def can_execute(self) -> bool:
         """Check if request should be allowed."""
         state = self.state
         return state in (self.CLOSED, self.HALF_OPEN)
 
-
-
-    
     def record_success(self):
         """Record successful request."""
         self._failure_count = 0
         self._state = self.CLOSED
         self._last_success_time = time.time()
-    
+
     def record_failure(self):
         """Record failed request."""
         self._failure_count += 1
         self._last_failure_time = time.time()
-        
+
         if self._failure_count >= self.failure_threshold:
             self._state = self.OPEN
-    
+
     def reset(self):
         """Manually reset circuit breaker."""
         self._state = self.CLOSED
         self._failure_count = 0
-        self._last_failure_time = 0
-
-
+        self._last_failure_time = 0.0
 
 
 class RateLimiter:
     """Token bucket rate limiter.
-    
+
     Allows burst up to bucket_size, then limits to tokens_per_second.
     """
-    
+
     def __init__(self, tokens_per_second: float = 1.0, bucket_size: int = 10):
         self.tokens_per_second = tokens_per_second
         self.bucket_size = bucket_size
-        self.tokens = bucket_size
+        self.tokens: float = float(bucket_size)
         self.last_update = time.time()
         self.total_wait_time = 0.0
         self.total_waits = 0
-    
+
     def _refill(self):
         """Refill tokens based on elapsed time."""
         now = time.time()
         elapsed = now - self.last_update
         self.tokens = min(self.bucket_size, self.tokens + elapsed * self.tokens_per_second)
         self.last_update = now
-    
+
     def acquire(self, timeout: float = 30.0) -> bool:
         """Acquire a token, waiting if necessary. Returns False on timeout."""
         start_time = time.time()
-        
+
         while True:
             self._refill()
-            
+
             if self.tokens >= 1:
                 self.tokens -= 1
                 if self.total_waits > 0:
                     self.total_wait_time += time.time() - start_time
                 return True
-            
+
             # Not enough tokens, wait
             if timeout > 0 and (time.time() - start_time) >= timeout:
                 return False
-            
+
             # Wait for next token
             wait_time = (1 - self.tokens) / self.tokens_per_second
             time.sleep(min(wait_time, 0.1))  # Sleep in small increments
             self.total_waits += 1
-    
+
     def stats(self) -> dict:
         """Return rate limiter statistics."""
         return {
@@ -329,28 +349,28 @@ class RateLimiter:
             "bucket_size": self.bucket_size,
             "current_tokens": round(self.tokens, 2),
             "total_waits": self.total_waits,
-            "avg_wait_time": round(self.total_wait_time / self.total_waits, 3) if self.total_waits > 0 else 0
+            "avg_wait_time": round(self.total_wait_time / self.total_waits, 3) if self.total_waits > 0 else 0,
         }
 
 
 class ResultCache:
     """Simple TTL-based in-memory cache for check results."""
-    
+
     def __init__(self, ttl_seconds: int = 300):
         self.ttl = ttl_seconds
-        self._cache: dict[str, tuple[float, Any]] = {}
+        self._cache: dict[str, tuple[float, dict[str, Any]]] = {}
         self.hits = 0
         self.misses = 0
-    
+
     def _make_key(self, url: str, check: str) -> str:
         """Create cache key from URL and check name."""
         return hashlib.sha256(f"{url}:{check}".encode()).hexdigest()
-    
-    def get(self, url: str, check: str) -> Any | None:
+
+    def get(self, url: str, check: str) -> dict[str, Any] | None:
         """Get cached result if valid, else None."""
         if self.ttl <= 0:
             return None
-        
+
         key = self._make_key(url, check)
         if key in self._cache:
             timestamp, data = self._cache[key]
@@ -360,18 +380,18 @@ class ResultCache:
             else:
                 # Expired
                 del self._cache[key]
-        
+
         self.misses += 1
         return None
-    
-    def set(self, url: str, check: str, data: Any):
+
+    def set(self, url: str, check: str, data: dict[str, Any]) -> None:
         """Cache result with current timestamp."""
         if self.ttl <= 0:
             return
-        
+
         key = self._make_key(url, check)
         self._cache[key] = (time.time(), data)
-    
+
     def stats(self) -> dict:
         """Return cache statistics."""
         total = self.hits + self.misses
@@ -380,9 +400,9 @@ class ResultCache:
             "misses": self.misses,
             "hit_rate": round(self.hits / total * 100, 1) if total > 0 else 0,
             "size": len(self._cache),
-            "ttl_seconds": self.ttl
+            "ttl_seconds": self.ttl,
         }
-    
+
     def clear(self):
         """Clear all cached entries."""
         self._cache.clear()
@@ -416,9 +436,7 @@ class WebCheckClient:
         self._opener = opener  # injectable for tests
         # Enable fallback automatically when using a public base or the
         # default local base that the user did not explicitly set.
-        self.fallback = bool(fallback) if fallback is not None else (
-            self.base_url.startswith("https://web-check.")
-        )
+        self.fallback = bool(fallback) if fallback is not None else (self.base_url.startswith("https://web-check."))
         self._resolved_base: str | None = None
         # Wave 4 production features: result cache, per-base circuit breakers
         # and a token-bucket rate limiter. Env vars are read per instance so
@@ -433,9 +451,7 @@ class WebCheckClient:
         if group:
             keys = CHECK_GROUPS.get(group)
             if keys is None:
-                raise ValueError(
-                    f"Unknown group '{group}'. Known: {', '.join(sorted(CHECK_GROUPS))}"
-                )
+                raise ValueError(f"Unknown group '{group}'. Known: {', '.join(sorted(CHECK_GROUPS))}")
         else:
             keys = sorted(CHECKS.keys())
         return [
@@ -579,7 +595,7 @@ class WebCheckClient:
             cb = self._circuit_breakers[base]
             if cb.can_execute():
                 filtered_bases.append(base)
-        
+
         if not filtered_bases:
             # All circuits open, return error
             return {
@@ -587,7 +603,7 @@ class WebCheckClient:
                 "ok": False,
                 "status": 0,
                 "error": "All API endpoints are unavailable (circuit breakers open)",
-                "data": None
+                "data": None,
             }
         bases = filtered_bases
 
