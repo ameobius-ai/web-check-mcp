@@ -192,9 +192,7 @@ class TestStdioLoop:
 
         try:
             proc.stdout.close()
-            proc.stdin.write(
-                encode_message({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
-            )
+            proc.stdin.write(encode_message({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}))
             proc.stdin.close()
             return_code = proc.wait(timeout=5)
             stderr = proc.stderr.read()
